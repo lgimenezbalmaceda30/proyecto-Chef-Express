@@ -1,0 +1,38 @@
+name: Supabase keepalive
+
+# Supabase pausa proyectos del plan Free tras ~7 días sin actividad de
+# queries. Un SELECT simple cuenta como actividad válida (confirmado en
+# CLAUDE.md §8). Este workflow le pega un SELECT liviano a "testing" y a
+# "producción" cada pocos días para que ninguno de los dos se pause.
+#
+# Usa las publishable ("anon") keys — son públicas por diseño, ya están
+# embebidas tal cual en index.html, no hace falta cargar ningún secret.
+# Si algún proyecto pasa a Supabase Pro (no se pausa nunca), este workflow
+# se puede desactivar sin drama: Actions → Supabase keepalive → Disable.
+
+on:
+  schedule:
+    - cron: "0 6 */3 * *" # cada ~3 días, 06:00 UTC (03:00 Arg. en horario de verano / 03:00-04:00 según DST)
+  workflow_dispatch: {} # permite tirarlo a mano desde la pestaña Actions
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping testing
+        run: |
+          curl -sS --fail-with-body \
+            "https://zvvhuzzpliuielvtljzb.supabase.co/rest/v1/usuarios?select=id&limit=1" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
+          echo "OK: testing respondió"
+        env:
+          KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2dmh1enpwbGl1aWVsdnRsanpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxOTI2OTgsImV4cCI6MjA5Nzc2ODY5OH0.IjvU9sO-M-bLuMTVSBVnv-a7zhS4H6cx0qm7MmZMSxs
+
+      - name: Ping producción
+        run: |
+          curl -sS --fail-with-body \
+            "https://nczcoszzbzvqmbmymran.supabase.co/rest/v1/usuarios?select=id&limit=1" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY"
+          echo "OK: producción respondió"
+        env:
+          KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jemNvc3p6Ynp2cW1ibXltcmFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyMDUxMTYsImV4cCI6MjA5Nzc4MTExNn0.i5HNEnTcvGO4JeQC78ru_flnjYuhaixwvXWLJcBrDTw
