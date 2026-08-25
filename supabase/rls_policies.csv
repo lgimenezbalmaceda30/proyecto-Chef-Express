@@ -1,0 +1,16 @@
+schemaname,tablename,policyname,cmd,roles,qual,with_check
+public,catalogos,mvp_all,ALL,"{anon,authenticated}",true,true
+public,consumos,mvp_all,ALL,"{anon,authenticated}",true,true
+public,distribucion,mvp_all,ALL,"{anon,authenticated}",true,true
+public,empresas,mvp_all,ALL,"{anon,authenticated}",true,true
+public,insumos_limpieza,mvp_all,ALL,"{anon,authenticated}",true,true
+public,masas,mvp_all,ALL,"{anon,authenticated}",true,true
+public,movimientos_stock,mvp_all,ALL,"{anon,authenticated}",true,true
+public,mp,mvp_all,ALL,"{anon,authenticated}",true,true
+public,pt,mvp_all,ALL,"{anon,authenticated}",true,true
+public,ranking,mvp_all,ALL,"{anon,authenticated}",true,true
+public,registros_limpieza,mvp_all,ALL,"{anon,authenticated}",true,true
+public,rellenos,mvp_all,ALL,"{anon,authenticated}",true,true
+public,semi,mvp_all,ALL,"{anon,authenticated}",true,true
+public,usuarios,mvp_all,ALL,"{anon,authenticated}",true,true
+public,zonas_limpieza,mvp_all,ALL,"{anon,authenticated}",true,true

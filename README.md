@@ -1,5 +1,9 @@
 # Chefexprés · Trazabilidad
 
+> Para arquitectura completa, estado del proyecto, auditoría de seguridad y
+> pendientes reales, ver [`CLAUDE.md`](./CLAUDE.md) — es el documento de
+> referencia, este README es solo la puerta de entrada rápida.
+
 Sistema de trazabilidad alimentaria para Chefexprés: registra el recorrido
 completo de un producto — ingreso de materia prima → relleno → masa →
 semielaborado → producto terminado — además de limpieza de zonas e insumos

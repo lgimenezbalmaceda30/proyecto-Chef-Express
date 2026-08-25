@@ -1,15 +1,18 @@
 # Esquema de Supabase (producción)
 
+> Ver también [`CLAUDE.md`](../CLAUDE.md) en la raíz del repo — documento de
+> handoff con arquitectura completa, estado del proyecto, auditoría de
+> seguridad y plan de auth pendiente. Este archivo se enfoca solo en el
+> esquema de datos.
+
 Volcado el 2026-08-25 desde el proyecto de producción (`nczcoszzbzvqmbmymran`),
 consultando `information_schema.columns` del esquema `public`. Fuente cruda:
 [`schema_columns.csv`](./schema_columns.csv) (183 columnas, 15 tablas).
 
-**Importante — qué NO cubre este dump:** solo lista columnas, tipos,
-nullability y default. No incluye primary keys, foreign keys, índices,
-triggers, funciones ni políticas RLS. Como la app pega contra Supabase con
-la publishable (`anon`) key directamente desde el navegador, las políticas
-RLS son las que realmente deciden qué puede leer/escribir cada usuario — así
-que en algún momento conviene volcarlas también (ver "Pendiente" al final).
+**Qué NO cubre este dump:** columnas, tipos, nullability y default sí; no
+incluye primary keys, foreign keys, índices, triggers ni funciones (ver
+"Pendiente" al final). Las políticas RLS sí se relevaron por separado —
+sección propia más abajo.
 
 Todas las tablas son multi-tenant: tienen `empresa_id uuid` con default
 `00000000-0000-0000-0000-0000000000c1` (el `EMPRESA_ID` de Chefexprés
@@ -68,24 +71,52 @@ estado, ts_ingreso, created_at`
 
 ## Tablas que existen en la base pero `index.html` todavía NO usa
 
-Preparadas para funcionalidad futura — no las toca ninguna función de la app hoy:
+Confirmado (ver `CLAUDE.md` §7 "Módulos futuros vendibles"): son hooks
+**deliberados**, dejados "apagados" a propósito para poder vender el módulo
+más adelante sin migraciones destructivas sobre datos reales del cliente.
 
-- **`empresas`** (`id, nombre, created_at`) — registro de empresas. Hoy la
-  app usa el `EMPRESA_ID` fijo en el código en vez de leer de acá (soporte
-  multi-empresa sin activar todavía).
+- **`empresas`** (`id, nombre, created_at`) — soporte multi-tenant. Hoy la
+  app usa el `EMPRESA_ID` fijo en el código en vez de leer de acá.
 - **`distribucion`** (`id, empresa_id, pt_id, lote_pt, cliente, cantidad,
-  unidad, fecha_entrega, remito, obs, usuario_id, created_at`) — entrega de
-  producto terminado a clientes.
+  unidad, fecha_entrega, remito, obs, usuario_id, created_at`) — módulo de
+  trazabilidad hacia adelante / ventas-distribución a clientes.
 - **`movimientos_stock`** (`id, empresa_id, tabla, item_id, tipo, cantidad,
-  unidad, motivo, usuario_id, created_at`) — ledger de movimientos de stock
-  por ítem (entrada/salida/ajuste), a nivel más fino que `consumos`.
+  unidad, motivo, usuario_id, created_at`) — módulo de stock/scrap
+  management, junto con las columnas `cantidad_consumida`/`cantidad_scrap`
+  que ya existen en `mp`/`rellenos`/`masas`/`semi`/`pt`.
+
+## Políticas RLS
+
+Volcadas el 2026-08-25 (`pg_policies`, ver [`rls_policies.csv`](./rls_policies.csv)).
+**Las 15 tablas tienen la misma política única `mvp_all`:**
+
+| cmd | roles | qual | with_check |
+|---|---|---|---|
+| `ALL` | `{anon, authenticated}` | `true` | `true` |
+
+Es decir: **sin restricción real.** Cualquiera con la publishable (`anon`)
+key —pública por diseño, está en el propio `index.html`— puede leer y
+escribir cualquier fila de cualquier tabla, de cualquier `empresa_id`. Hoy
+`empresa_id` es solo un filtro de cortesía que aplica el cliente JS, no algo
+impuesto por la base.
+
+Esto **no es un descubrimiento nuevo** — está identificado y documentado
+como el hallazgo crítico de la auditoría de seguridad en `CLAUDE.md` §4-5:
+es "seguro por oscuridad" mientras el proyecto sea de un solo cliente y la
+URL/clave no circule; deja de ser aceptable en cuanto haya un segundo
+cliente comercial o se necesite trazabilidad con valor legal/normativo. El
+plan para resolverlo (Supabase Auth + RLS por `empresa_id` del JWT +
+eliminar columna `pw`) está bloqueado esperando que el cliente elija entre
+la Opción A/B de auth (ver `CLAUDE.md` §5) — no arrancar esa migración sin
+esa decisión.
 
 ## Pendiente (para completar el panorama)
 
-Si en algún momento querés que lo sume, pasame también el resultado de:
+Todavía no relevado: **primary keys / foreign keys** (información_schema
+no las trae junto con las columnas). Si en algún momento querés sumarlo,
+corré esto y pasame el resultado:
 
 ```sql
--- Primary / foreign keys
 select tc.table_name, tc.constraint_type, kcu.column_name,
        ccu.table_name as references_table, ccu.column_name as references_column
 from information_schema.table_constraints tc
@@ -93,16 +124,11 @@ join information_schema.key_column_usage kcu on tc.constraint_name = kcu.constra
 left join information_schema.constraint_column_usage ccu on tc.constraint_name = ccu.constraint_name
 where tc.table_schema = 'public' and tc.constraint_type in ('PRIMARY KEY','FOREIGN KEY')
 order by tc.table_name;
-
--- Políticas RLS (clave, porque el cliente usa la anon key directo)
-select schemaname, tablename, policyname, cmd, roles, qual, with_check
-from pg_policies where schemaname = 'public'
-order by tablename, policyname;
 ```
 
 ## Cómo mantener esto al día
 
-Este documento y `schema_columns.csv` son un snapshot manual. Cuando
-apliques un cambio de esquema en Supabase, volvé a correr la consulta de
-`information_schema.columns` (ver conversación / historial) y pasame el
-CSV actualizado para que lo suba de nuevo.
+Este documento y los CSV (`schema_columns.csv`, `rls_policies.csv`) son un
+snapshot manual. Cuando apliques un cambio de esquema o de políticas en
+Supabase, volvé a correr las consultas correspondientes y pasame el
+resultado actualizado para que lo suba de nuevo.
