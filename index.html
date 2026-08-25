@@ -1,0 +1,1935 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="theme-color" content="#A8C820"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="TrazeApp"/>
+<title>Chefexprés · Trazabilidad</title>
+<link rel="manifest" href="/manifest.json"/>
+<link rel="icon" href="/favicon.ico" sizes="any"/>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png"/>
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png"/>
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png"/>
+<link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{background:#0A1A0C;color:#F0F7E6;font-family:system-ui,-apple-system,sans-serif;overscroll-behavior:none}
+input,select,textarea,button{font-family:inherit}
+input[type=datetime-local]::-webkit-calendar-picker-indicator,
+input[type=date]::-webkit-calendar-picker-indicator{filter:invert(0.7)}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:#0A1A0C}::-webkit-scrollbar-thumb{background:#2A4A2D;border-radius:2px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+/* ============================================================
+   CONFIGURACIÓN DE SUPABASE
+   ------------------------------------------------------------
+   ENTORNO POR HOSTNAME (fail-safe): SOLO los dominios listados en
+   HOSTS_PROD apuntan a producción. Cualquier otro origen (sitio de
+   testing, localhost, archivo local, dominio nuevo) cae a TESTING.
+   Es imposible escribir datos de prueba en la base del cliente
+   por accidente. Para forzar a mano: ENV_OVERRIDE.
+   ============================================================ */
+const HOSTS_PROD = ["chefexpress.netlify.app"];
+const ENV_OVERRIDE = null; // null | "testing" | "produccion"
+const ENV = ENV_OVERRIDE ?? (HOSTS_PROD.includes(location.hostname) ? "produccion" : "testing");
+
+/* PEGÁ ACÁ las claves de cada proyecto (URL + publishable key).
+   Las copiás de Supabase → Project Settings → API.
+   La publishable key es pública por diseño: no hay problema en que esté acá.
+   NUNCA pegues la "service_role"/"secret". */
+const SUPA = {
+  testing: {
+    url: "https://zvvhuzzpliuielvtljzb.supabase.co",
+    key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2dmh1enpwbGl1aWVsdnRsanpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxOTI2OTgsImV4cCI6MjA5Nzc2ODY5OH0.IjvU9sO-M-bLuMTVSBVnv-a7zhS4H6cx0qm7MmZMSxs",
+  },
+  produccion: {
+    url: "https://nczcoszzbzvqmbmymran.supabase.co",
+    key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jemNvc3p6Ynp2cW1ibXltcmFuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyMDUxMTYsImV4cCI6MjA5Nzc4MTExNn0.i5HNEnTcvGO4JeQC78ru_flnjYuhaixwvXWLJcBrDTw",
+  },
+};
+
+const SUPA_CFG = SUPA[ENV];
+const SUPA_READY = SUPA_CFG && !SUPA_CFG.url.startsWith("PEGAR_") && typeof supabase!=="undefined";
+const sb = SUPA_READY ? supabase.createClient(SUPA_CFG.url, SUPA_CFG.key) : null;
+const EMPRESA_ID = "00000000-0000-0000-0000-0000000000c1"; // Chefexprés
+
+
+/* BRAND */
+const B = {
+  bg:"#0A1A0C", surface:"#111F13", card:"#172419", border:"#243D27",
+  accent:"#A8C820", accentD:"#4A5C0A", yellow:"#F5D020", green:"#2E8B3A",
+  red:"#E53935", amber:"#F59E0B", text:"#F0F7E6", muted:"#7A9B7D",
+  subtle:"#1E3521", purple:"#A78BFA",
+  logo:"https://acdn-us.mitiendanube.com/stores/001/497/896/themes/common/logo-1171322680-1643159865-94616bda82b53c25dcee770f38a400481643159865-480-0.webp",
+};
+
+/* PERMISOS — keys de casillas tildables */
+const PERM_CARGA = [
+  {k:"mp",      label:"📦 Cargar Ingreso MP"},
+  {k:"rellenos",label:"🥩 Cargar Rellenos"},
+  {k:"masas",   label:"🥖 Cargar Masas"},
+  {k:"semi",    label:"🥟 Cargar Semielaborados"},
+  {k:"pt",      label:"✅ Cargar Producto Terminado"},
+  {k:"limpieza",label:"🧼 Registrar Limpiezas"},
+  {k:"insumoslimp",label:"🧴 Cargar Insumos de Limpieza"},
+];
+const PERM_FUNC = [
+  {k:"traze",   label:"🔗 Ver Trazabilidad"},
+  {k:"efic",    label:"📊 Ver Eficiencia"},
+  {k:"exportar",label:"📤 Exportar datos"},
+  {k:"aprobar", label:"✋ Aprobar anulaciones"},
+];
+// "config catálogos + usuarios" NO es casilla: exclusivo de esAdmin.
+
+const can = (u,perm)=> !!u && (u.esAdmin || (u.permisos&&u.permisos[perm]));
+
+/* STORAGE LOCAL (caché por entorno; la verdad vive en Supabase) */
+const NS = `ce_${ENV}`;
+const KEY = base => `${NS}_${base}`;
+const LS = {
+  get:(base,d=[])=>{ try{return JSON.parse(localStorage.getItem(KEY(base))??JSON.stringify(d));}catch{return d;} },
+  set:(base,v)=>localStorage.setItem(KEY(base),JSON.stringify(v)),
+  del:(base)=>localStorage.removeItem(KEY(base)),
+};
+
+/* ============================================================
+   OUTBOX: cola de sincronización pendiente.
+   ------------------------------------------------------------
+   Todo push que falla (sin red, error de RLS o GRANT) se encola
+   acá y se reintenta: al abrir la app (ANTES del pullAll, para que
+   la nube no pise datos locales aún no subidos), al volver la
+   conexión (evento "online") y a mano desde el badge del header.
+   Sin esto, un registro cargado offline se perdía en el próximo
+   pullAll. Los reintentos son idempotentes (upsert por id).
+   ============================================================ */
+const obGet=()=>LS.get("_outbox",[]);
+const obSet=q=>LS.set("_outbox",q);
+const obAdd=op=>{ const q=obGet(); q.push({...op,_ts:new Date().toISOString()}); obSet(q); console.warn("outbox: encolado para reintento →",op.fn,op.store||""); };
+
+// Ejecuta una operación contra Supabase. Devuelve true solo si la nube la aceptó.
+async function execOp(op){
+  if(!sb) return false;
+  try{
+    switch(op.fn){
+      case "rows":      return await execPushRows(op.store,op.items);
+      case "zona":      { const {error}=await sb.from("zonas_limpieza").upsert(op.row,{onConflict:"id"}); if(error)console.warn("zona",error.message); return !error; }
+      case "delzona":   { const {error}=await sb.from("zonas_limpieza").delete().eq("id",op.id); if(error)console.warn("delzona",error.message); return !error; }
+      case "limpieza":  { const {error}=await sb.from("registros_limpieza").upsert(op.row,{onConflict:"id"}); if(error)console.warn("limpieza",error.message); return !error; }
+      case "insumo":    { const {error}=await sb.from("insumos_limpieza").upsert(op.row,{onConflict:"id"}); if(error)console.warn("insumo",error.message); return !error; }
+      case "catalogos": { const {error}=await sb.from("catalogos").upsert(op.row,{onConflict:"empresa_id"}); if(error)console.warn("catalogos",error.message); return !error; }
+      case "user":      { const {error}=await sb.from("usuarios").upsert(op.row,{onConflict:"id"}); if(error)console.warn("user",error.message); return !error; }
+      case "deluser":   { const {error}=await sb.from("usuarios").delete().eq("id",op.id); if(error)console.warn("deluser",error.message); return !error; }
+      case "ranking":   { const {error}=await sb.from("ranking").upsert(op.row,{onConflict:"empresa_id,usuario_id"}); if(error)console.warn("ranking",error.message); return !error; }
+      default: return true;
+    }
+  }catch(e){ console.warn("execOp",op.fn,e.message); return false; }
+}
+// Intenta ejecutar; si falla, encola para reintento posterior.
+async function syncOp(op){ if(!sb) return false; const ok=await execOp(op); if(!ok) obAdd(op); return ok; }
+// Reintenta todo lo pendiente en orden. Lo que sigue fallando queda en cola.
+let _flushing=false;
+async function obFlush(){
+  if(!sb||_flushing) return;
+  _flushing=true;
+  try{
+    const q=obGet(); if(!q.length) return;
+    const rest=[];
+    for(const op of q){ const ok=await execOp(op); if(!ok) rest.push(op); }
+    obSet(rest);
+    console.info(rest.length===0?"outbox: todo sincronizado ✓":`outbox: quedan ${rest.length} pendiente(s)`);
+  } finally { _flushing=false; }
+}
+window.addEventListener("online",()=>obFlush());
+
+/* ============================================================
+   CAPA DE SINCRONIZACIÓN CON SUPABASE (Camino B)
+   ------------------------------------------------------------
+   La app sigue trabajando con LS (rápido, sin esperas). Esta capa
+   sincroniza en segundo plano: baja al abrir (pullAll) y sube en
+   cada guardado (pushRows / pushOne). Si Supabase no está configurado
+   (claves sin pegar), la app funciona 100% local como antes.
+   ============================================================ */
+
+// Mapeo de campos entre el modelo local y las columnas de Supabase.
+// Las tablas de producción guardan timestamp_inicio/fin; en la base son ts_inicio/fin.
+const toRow = {
+  mp:(i)=>({ id:i.id, empresa_id:EMPRESA_ID, proveedor:i.proveedor, material:i.material, lote:i.lote,
+    cantidad:i.cantidad, unidad:i.unidad, fecha_vto:i.fecha_vto||null, obs:i.obs||null, remito:i.remito||null,
+    retrasada:!!i.retrasada, ts_ingreso:i.timestamp||null, ts_carga:i.ts_carga||null,
+    demora_min:i.demora_min||0, condiciones:i.condiciones||null,
+    cantidad_consumida:i.cantidad_consumida??null, cantidad_scrap:i.cantidad_scrap??null, unidad_scrap:i.unidad_scrap??null,
+    operario:i.operario||null, estado:i.estado||"disponible", anulacion:i.anulacion||null }),
+  prod:(i)=>({ id:i.id, empresa_id:EMPRESA_ID, tipo:i.tipo, lote:i.lote, cantidad:i.cantidad??null, unidad:i.unidad,
+    fecha_vto:i.fecha_vto||null, obs:i.obs||null,
+    cantidad_consumida:i.cantidad_consumida??null, cantidad_scrap:i.cantidad_scrap??null, unidad_scrap:i.unidad_scrap??null,
+    operario:i.operario||null, estado:i.estado||"en_proceso", anulacion:i.anulacion||null,
+    ts_inicio:i.timestamp_inicio||null, ts_fin:i.timestamp_fin||null }),
+};
+// Traducción inversa: fila de Supabase → objeto local
+const fromRow = {
+  mp:(r)=>({ id:r.id, proveedor:r.proveedor, material:r.material, lote:r.lote, cantidad:r.cantidad, unidad:r.unidad,
+    fecha_vto:r.fecha_vto, obs:r.obs, remito:r.remito, retrasada:r.retrasada, timestamp:r.ts_ingreso, ts_carga:r.ts_carga,
+    demora_min:r.demora_min, condiciones:r.condiciones, cantidad_consumida:r.cantidad_consumida,
+    cantidad_scrap:r.cantidad_scrap, unidad_scrap:r.unidad_scrap, operario:r.operario, estado:r.estado, anulacion:r.anulacion }),
+  prod:(r)=>({ id:r.id, tipo:r.tipo, lote:r.lote, cantidad:r.cantidad, unidad:r.unidad, fecha_vto:r.fecha_vto, obs:r.obs,
+    cantidad_consumida:r.cantidad_consumida, cantidad_scrap:r.cantidad_scrap, unidad_scrap:r.unidad_scrap,
+    operario:r.operario, estado:r.estado, anulacion:r.anulacion,
+    timestamp_inicio:r.ts_inicio, timestamp_fin:r.ts_fin }),
+};
+const PROD_STORES=["rellenos","masas","semi","pt"];
+const rowMapper = store => store==="mp" ? toRow.mp : toRow.prod;
+const objMapper = store => store==="mp" ? fromRow.mp : fromRow.prod;
+
+// Ejecutor real: sube ítems de un store (upsert por id) + sus consumos.
+// Devuelve true SOLO si todo llegó a la nube. Todos los errores se chequean
+// y loguean (clave para detectar GRANTs faltantes en tablas nuevas).
+async function execPushRows(store, items){
+  const rows = items.map(rowMapper(store));
+  const { error } = await sb.from(store).upsert(rows, { onConflict:"id" });
+  if(error){ console.warn("push "+store, error.message); return false; }
+  for(const it of items){
+    if(it.consumo && Object.keys(it.consumo).length){
+      const crows = Object.entries(it.consumo).map(([origenId,c])=>({
+        empresa_id:EMPRESA_ID, destino_tabla:store, destino_id:it.id,
+        origen_tabla:c.store, origen_id:origenId, cantidad:c.cantidad,
+        // unidad desnormalizada desde el ítem origen (útil para el futuro módulo de stock)
+        unidad:(LS.get(c.store).find(x=>x.id===origenId)||{}).unidad||null,
+      }));
+      // borrar consumos previos de ese destino y recargar (simple, consistente e idempotente)
+      const d = await sb.from("consumos").delete().eq("empresa_id",EMPRESA_ID).eq("destino_tabla",store).eq("destino_id",it.id);
+      if(d.error){ console.warn("push consumos (delete)", d.error.message); return false; }
+      const ins = await sb.from("consumos").insert(crows);
+      if(ins.error){ console.warn("push consumos (insert)", ins.error.message); return false; }
+    }
+  }
+  return true;
+}
+// API usada por la app: intenta subir; si falla, queda encolado en el outbox.
+async function pushRows(store, items){
+  if(!sb) return;
+  await syncOp({fn:"rows", store, items});
+}
+
+// Baja todos los datos de Supabase y los vuelca al LS (caché local)
+async function pullAll(){
+  if(!sb) return false;
+  try{
+    // catálogos
+    const cat = await sb.from("catalogos").select("data").eq("empresa_id",EMPRESA_ID).maybeSingle();
+    if(cat.data && cat.data.data) LS.set("catalogos", cat.data.data);
+    // usuarios
+    const us = await sb.from("usuarios").select("*").eq("empresa_id",EMPRESA_ID);
+    if(us.data) LS.set("users", us.data.map(u=>({ id:u.id, usr:u.usr, pw:u.pw, nombre:u.nombre, esAdmin:u.es_admin, permisos:u.permisos||{} })));
+    // mp + producción (reconstruyendo consumo desde tabla consumos)
+    const cons = await sb.from("consumos").select("*").eq("empresa_id",EMPRESA_ID);
+    const consByDest = {};
+    (cons.data||[]).forEach(c=>{ const k=c.destino_tabla+":"+c.destino_id; (consByDest[k]=consByDest[k]||{})[c.origen_id]={cantidad:Number(c.cantidad),store:c.origen_tabla}; });
+    // Mapa de campo _ids por tabla origen, para reconstruir las relaciones de la cadena
+    const IDS_FIELD = { mp:"mp_ids", rellenos:"relleno_ids", masas:"masa_ids", semi:"semi_ids" };
+    for(const store of ["mp",...PROD_STORES]){
+      const res = await sb.from(store).select("*").eq("empresa_id",EMPRESA_ID);
+      if(res.data){
+        const map = objMapper(store);
+        const items = res.data.map(r=>{
+          const o=map(r); const k=store+":"+r.id;
+          if(consByDest[k]){
+            o.consumo=consByDest[k];
+            // reconstruir los _ids agrupando por tabla de origen (necesario para getChain)
+            Object.entries(consByDest[k]).forEach(([origenId,info])=>{
+              const f=IDS_FIELD[info.store]; if(!f) return;
+              (o[f]=o[f]||[]).push(origenId);
+            });
+          }
+          return o;
+        }).sort((a,b)=>{ const ta=a.timestamp||a.timestamp_inicio||"", tb=b.timestamp||b.timestamp_inicio||""; return ta<tb?1:-1; });
+        // No pisar registros locales que siguen pendientes de subir (outbox):
+        // la versión local gana hasta que logre sincronizarse.
+        obGet().filter(o=>o.fn==="rows"&&o.store===store).flatMap(o=>o.items).forEach(p=>{
+          const idx=items.findIndex(x=>x.id===p.id);
+          if(idx>=0) items[idx]=p; else items.unshift(p);
+        });
+        LS.set(store, items);
+      }
+    }
+    // ranking
+    const rk = await sb.from("ranking").select("*").eq("empresa_id",EMPRESA_ID);
+    if(rk.data) LS.set("ranking", rk.data.map(r=>({ userId:r.usuario_id, nombre:r.nombre, mejorPct:r.mejor_pct, intentos:r.intentos, ultima:r.ultima })));
+    // zonas de limpieza
+    const zl = await sb.from("zonas_limpieza").select("*").eq("empresa_id",EMPRESA_ID).order("created_at",{ascending:true});
+    if(zl.data) LS.set("zonas_limpieza", zl.data.map(z=>({ id:z.id, nombre:z.nombre, poes:z.poes, items:z.items||[], activo:z.activo })));
+    // registros de limpieza
+    const rl = await sb.from("registros_limpieza").select("*").eq("empresa_id",EMPRESA_ID).order("ts_registro",{ascending:false});
+    if(rl.data){
+      const arr = rl.data.map(r=>({ id:r.id, zona_id:r.zona_id, zona_nombre:r.zona_nombre, poes:r.poes, items_ok:r.items_ok||[], observaciones:r.observaciones, operario:r.operario, ts_registro:r.ts_registro }));
+      obGet().filter(o=>o.fn==="limpieza").forEach(o=>{ if(!arr.some(x=>x.id===o.row.id)) arr.unshift(o.row); });
+      LS.set("registros_limpieza", arr);
+    }
+    // insumos de limpieza
+    const il = await sb.from("insumos_limpieza").select("*").eq("empresa_id",EMPRESA_ID).order("ts_ingreso",{ascending:false});
+    if(il.data){
+      const arr = il.data.map(r=>({ id:r.id, insumo:r.insumo, proveedor:r.proveedor, lote:r.lote, remito:r.remito, cantidad:r.cantidad, unidad:r.unidad, fecha_vto:r.fecha_vto, apto_alimenticio:r.apto_alimenticio, nro_certificado:r.nro_certificado, obs:r.obs, operario:r.operario, estado:r.estado, ts_ingreso:r.ts_ingreso }));
+      obGet().filter(o=>o.fn==="insumo").forEach(o=>{ if(!arr.some(x=>x.id===o.row.id)) arr.unshift(o.row); });
+      LS.set("insumos_limpieza", arr);
+    }
+    LS.set("_lastsync", new Date().toISOString());
+    return true;
+  }catch(e){ console.warn("pullAll", e.message); return false; }
+}
+
+// Guarda una zona de limpieza en Supabase (con reintento vía outbox)
+async function pushZona(z){ syncOp({fn:"zona", row:{ id:z.id, empresa_id:EMPRESA_ID, nombre:z.nombre, poes:z.poes||null, items:z.items||[], activo:z.activo!==false }}); }
+async function delZona(id){ syncOp({fn:"delzona", id}); }
+// Guarda un registro de limpieza (upsert por id → el reintento es idempotente)
+async function pushLimpieza(r){ syncOp({fn:"limpieza", row:{ id:r.id, empresa_id:EMPRESA_ID, zona_id:r.zona_id, zona_nombre:r.zona_nombre, poes:r.poes||null, items_ok:r.items_ok||[], observaciones:r.observaciones||null, operario:r.operario, ts_registro:r.ts_registro }}); }
+// Guarda un ingreso de insumo de limpieza
+async function pushInsumo(r){ syncOp({fn:"insumo", row:{ id:r.id, empresa_id:EMPRESA_ID, insumo:r.insumo, proveedor:r.proveedor, lote:r.lote, remito:r.remito||null, cantidad:r.cantidad, unidad:r.unidad, fecha_vto:r.fecha_vto||null, apto_alimenticio:!!r.apto_alimenticio, nro_certificado:r.nro_certificado||null, obs:r.obs||null, operario:r.operario, estado:r.estado||"disponible", ts_ingreso:r.ts_ingreso }}); }
+
+// Guarda catálogos en Supabase
+async function pushCatalogos(data){ syncOp({fn:"catalogos", row:{ empresa_id:EMPRESA_ID, data, updated_at:new Date().toISOString() }}); }
+// Guarda un usuario en Supabase
+async function pushUser(u){ syncOp({fn:"user", row:{ id:u.id, empresa_id:EMPRESA_ID, usr:u.usr, pw:u.pw, nombre:u.nombre, es_admin:!!u.esAdmin, permisos:u.permisos||{} }}); }
+// Guarda ranking en Supabase
+async function pushRanking(r){ syncOp({fn:"ranking", row:{ empresa_id:EMPRESA_ID, usuario_id:r.userId, nombre:r.nombre, mejor_pct:r.mejorPct, intentos:r.intentos, ultima:r.ultima }}); }
+
+
+/* SEED USUARIOS */
+const USERS_DEF = [
+  {id:"u1",usr:"admin",pw:"1234",nombre:"Admin (config)",esAdmin:true,
+   permisos:{mp:true,rellenos:true,masas:true,semi:true,pt:true,traze:true,efic:true,exportar:true,aprobar:true}},
+  {id:"u2",usr:"supervisor",pw:"1234",nombre:"C. Villalba",esAdmin:false,
+   permisos:{mp:true,rellenos:true,masas:true,semi:true,pt:true,traze:true,efic:true,exportar:true,aprobar:true}},
+  {id:"u3",usr:"operario",pw:"1234",nombre:"M. Rodríguez",esAdmin:false,
+   permisos:{mp:true,rellenos:true,masas:true,semi:true,pt:true,traze:false,efic:false,exportar:false,aprobar:false}},
+];
+if(localStorage.getItem(KEY("users"))===null) LS.set("users",USERS_DEF);
+
+/* SEED CATÁLOGOS (editables por admin) */
+const CAT_DEF = {
+  mp_materiales:["Carne vacuna picada","Pollo deshuesado","Jamón cocido","Queso mozzarella","Ricota","Espinaca","Calabaza","Harina 000","Huevos","Cebolla","Salsa de tomate","Crema de leche","Condimentos"],
+  mp_proveedores:["Frigorífico Sur","Aves del Sol","Lácteos Cuyo","Verduras del Campo","HarinaMax","Aromáticas del Sur"],
+  mp_unidades:["kg","lt","unid"],
+  rellenos:["Relleno Carne Vacuna","Relleno Pollo","Relleno Jamón y Queso","Relleno Verdura y Ricota","Relleno Calabaza"],
+  masas:["Masa para Empanada","Masa para Tarta","Masa para Canastita","Masa para Pasta"],
+  semi:["Empanada Criolla cruda","Empanada Jamón y Queso cruda","Empanada Pollo cruda","Tarta sin cocer","Canastita sin cocer","Croqueta cruda","Sorrentinos crudos"],
+  pt:["Empanadas Criollas x12","Empanadas Jamón y Queso x12","Empanadas Pollo x12","Tarta Pollo Familiar","Lasagna Bolognesa","Canastitas Verdura x6","Pastel de Papa","Sorrentinos x12"],
+  insumos_limpieza:["Detergente alcalino","Sanitizante clorado","Desengrasante","Alcohol 70%","Jabón de manos","Papel descartable","Bolsas de residuo"],
+};
+if(localStorage.getItem(KEY("catalogos"))===null) LS.set("catalogos",CAT_DEF);
+const getCat = ()=>{ const c=LS.get("catalogos",CAT_DEF); return {...CAT_DEF,...c}; };
+
+/* MIGRACIÓN: normaliza usuarios de versiones viejas sin borrar datos.
+   Corrige usuarios que quedaron sin esAdmin/permisos (formato antiguo). */
+const DATA_VERSION = 4;
+(function migrateUsers(){
+  const ALLPERM=[...PERM_CARGA,...PERM_FUNC].map(p=>p.k);
+  const allTrue=Object.fromEntries(ALLPERM.map(k=>[k,true]));
+  const cargaTrue=Object.fromEntries(ALLPERM.map(k=>[k,["mp","rellenos","masas","semi","pt"].includes(k)]));
+  let users=LS.get("users",[]);
+  users=users.map(u=>{
+    const esAdmin=(typeof u.esAdmin==="boolean")?u.esAdmin:(u.usr==="admin"||u.rol==="admin");
+    let permisos=(u.permisos&&typeof u.permisos==="object")?{...u.permisos}
+      :((u.rol==="admin"||u.rol==="supervisor"||esAdmin)?{...allTrue}:{...cargaTrue});
+    ALLPERM.forEach(k=>{ if(typeof permisos[k]!=="boolean") permisos[k]=false; });
+    const {rol,...rest}=u; // descartar campo viejo "rol"
+    return {...rest,esAdmin,permisos};
+  });
+  // Garantizar que siempre exista al menos un administrador
+  if(!users.some(u=>u.esAdmin)){
+    const a=users.find(u=>u.usr==="admin");
+    if(a) a.esAdmin=true; else users.unshift(USERS_DEF[0]);
+  }
+  LS.set("users",users);
+  localStorage.setItem(KEY("dataver"),String(DATA_VERSION));
+})();
+
+/* CONFIG DE ETAPAS */
+const CFGS = {
+  rellenos:{store:"rellenos", catKey:"rellenos", label:"Relleno", emoji:"🥩", unidades:["kg"], hasVto:true, hasLib:false,
+    sources:[{store:"mp",idsField:"mp_ids",label:"Materias primas utilizadas",emoji:"📦",
+      name:i=>i.material, sub:i=>`${i.proveedor} · Lote ${i.lote} · ${i.cantidad}${i.unidad}`,
+      avail:i=>i.estado!=="rechazado"&&i.estado!=="anulado"}]},
+  masas:{store:"masas", catKey:"masas", label:"Masa", emoji:"🥖", unidades:["kg"], hasVto:true, hasLib:false,
+    sources:[{store:"mp",idsField:"mp_ids",label:"Materias primas utilizadas",emoji:"📦",
+      name:i=>i.material, sub:i=>`${i.proveedor} · Lote ${i.lote} · ${i.cantidad}${i.unidad}`,
+      avail:i=>i.estado!=="rechazado"&&i.estado!=="anulado"}]},
+  semi:{store:"semi", catKey:"semi", label:"Semielaborado", emoji:"🥟", unidades:["unid","kg"], hasVto:true, hasLib:false,
+    sources:[
+      {store:"rellenos",idsField:"relleno_ids",label:"Rellenos utilizados",emoji:"🥩",name:i=>i.tipo,sub:i=>`Lote ${i.lote} · ${qtyTxt(i)}`,avail:i=>i.estado==="terminado"||i.estado==="liberado"},
+      {store:"masas",idsField:"masa_ids",label:"Masas utilizadas",emoji:"🥖",name:i=>i.tipo,sub:i=>`Lote ${i.lote} · ${qtyTxt(i)}`,avail:i=>i.estado==="terminado"||i.estado==="liberado"},
+    ]},
+  pt:{store:"pt", catKey:"pt", label:"Producto Terminado", emoji:"✅", unidades:["unid","kg"], hasVto:true, hasLib:true,
+    sources:[{store:"semi",idsField:"semi_ids",label:"Semielaborados utilizados",emoji:"🥟",
+      name:i=>i.tipo, sub:i=>`Lote ${i.lote} · ${qtyTxt(i)}`, avail:i=>i.estado==="terminado"||i.estado==="liberado"}]},
+};
+
+/* HELPERS */
+const uid=()=> (crypto.randomUUID ? crypto.randomUUID() :
+  "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==="x"?r:(r&0x3|0x8)).toString(16);}));
+const now=()=>new Date().toISOString();
+const fmt=iso=>{ if(!iso) return "-"; const d=new Date(iso); return d.toLocaleDateString("es-AR",{day:"2-digit",month:"2-digit",year:"2-digit"})+" "+d.toLocaleTimeString("es-AR",{hour:"2-digit",minute:"2-digit"}); };
+// Texto buscable de una fecha en varios formatos (DD/MM/AA, DD/MM/AAAA, AAAA-MM-DD) para que el buscador encuentre por fecha tipeada de cualquier forma
+const fechaBuscable=iso=>{ if(!iso) return ""; const d=new Date(iso); if(isNaN(d)) return ""; const dd=String(d.getDate()).padStart(2,"0"),mm=String(d.getMonth()+1).padStart(2,"0"),yyyy=String(d.getFullYear()); return `${dd}/${mm}/${yyyy.slice(2)} ${dd}/${mm}/${yyyy} ${yyyy}-${mm}-${dd}`; };
+const diffM=(a,b)=>Math.round((new Date(b)-new Date(a))/60000);
+const diffHM=(a,b)=>{ const m=diffM(a,b); return m<60?`${m}m`:`${Math.floor(m/60)}h ${m%60}m`; };
+const nowDTL=()=>{ const d=new Date(); d.setMinutes(d.getMinutes()-d.getTimezoneOffset()); return d.toISOString().slice(0,16); };
+
+/* LOTE AUTOMÁTICO (preparado, no activo en MVP local).
+   Formato robusto: PREFIJO-AAAAMMDD-NN  (ej. HAR-20260623-01)
+   En local puede haber colisión si dos personas cargan a la vez; por eso el
+   correlativo definitivo se generará del lado de Supabase. Esta función queda
+   lista para reutilizar la lógica de prefijo/fecha. */
+const prefijoDe=nombre=>(nombre||"XXX").normalize("NFD").replace(/[^a-zA-Z]/g,"").slice(0,3).toUpperCase().padEnd(3,"X");
+const nextLote=(store,nombre)=>{
+  const fecha=new Date().toISOString().slice(0,10).replace(/-/g,"");
+  const pref=prefijoDe(nombre);
+  const base=`${pref}-${fecha}-`;
+  const hoy=LS.get(store).filter(i=>(i.lote||"").startsWith(base));
+  const nn=String(hoy.length+1).padStart(2,"0");
+  return `${base}${nn}`;
+};
+
+const ALL_STORES=["mp","rellenos","masas","semi","pt"];
+const STORE_LABEL={mp:"📦 Ingreso MP",rellenos:"🥩 Relleno",masas:"🥖 Masa",semi:"🥟 Semielaborado",pt:"✅ Producto Terminado"};
+const itemTitle=(store,i)=> store==="mp" ? i.material : i.tipo;
+// Cantidad con unidad, o "en proceso" si todavía no se cargó (producción sin terminar)
+const qtyTxt=i=> i.cantidad!=null ? `${i.cantidad} ${i.unidad}` : "en proceso";
+const itemSub=(store,i)=> store==="mp" ? `${i.proveedor} · Lote ${i.lote} · ${i.cantidad}${i.unidad}` : `Lote ${i.lote} · ${qtyTxt(i)}`;
+
+/* ANULACIONES */
+const requestAnul=(store,id,user,motivo)=>{
+  const list=LS.get(store);
+  const directo=can(user,"aprobar");
+  const upd=list.map(i=>{
+    if(i.id!==id) return i;
+    if(directo) return {...i,estado:"anulado",anulacion:{estado:"aprobada",solicitante:user.nombre,motivo_solicitud:motivo,solicitud_ts:now(),resuelto_por:user.nombre,motivo_resolucion:"Anulación directa (con permiso de aprobación)",resuelto_ts:now()}};
+    return {...i,anulacion:{estado:"pendiente",solicitante:user.nombre,motivo_solicitud:motivo,solicitud_ts:now()}};
+  });
+  LS.set(store,upd); if(sb) pushRows(store, upd.filter(i=>i.id===id)); return upd;
+};
+const resolveAnul=(store,id,user,aprobar,motivoRes)=>{
+  const list=LS.get(store);
+  const upd=list.map(i=>{
+    if(i.id!==id) return i;
+    if(aprobar) return {...i,estado:"anulado",anulacion:{...i.anulacion,estado:"aprobada",resuelto_por:user.nombre,motivo_resolucion:motivoRes,resuelto_ts:now()}};
+    return {...i,anulacion:{...i.anulacion,estado:"rechazada",resuelto_por:user.nombre,motivo_resolucion:motivoRes,resuelto_ts:now()}};
+  });
+  LS.set(store,upd); if(sb) pushRows(store, upd.filter(i=>i.id===id)); return upd;
+};
+const countPendientes=()=>ALL_STORES.reduce((acc,s)=>acc+LS.get(s).filter(i=>i.anulacion&&i.anulacion.estado==="pendiente").length,0);
+
+/* CADENA */
+const getChain=pt=>{
+  const semis=LS.get("semi").filter(s=>(pt.semi_ids||[]).includes(s.id));
+  const relIds=[...new Set(semis.flatMap(s=>s.relleno_ids||[]))];
+  const masaIds=[...new Set(semis.flatMap(s=>s.masa_ids||[]))];
+  const rellenos=LS.get("rellenos").filter(r=>relIds.includes(r.id));
+  const masas=LS.get("masas").filter(m=>masaIds.includes(m.id));
+  const mpIds=[...new Set([...rellenos,...masas].flatMap(x=>x.mp_ids||[]))];
+  const mp=LS.get("mp").filter(m=>mpIds.includes(m.id));
+  return {semis,rellenos,masas,mp};
+};
+
+/* ===== TRAZABILIDAD BIDIRECCIONAL (desde cualquier punto) ===== */
+const STORES_ORDER=["mp","rellenos","masas","semi","pt"];
+const STORE_META={
+  mp:      {label:"Materia prima",  emoji:"📦", color:"#60A5FA", idsField:null},
+  rellenos:{label:"Relleno",        emoji:"🥩", color:"#F59E0B", idsField:"relleno_ids", src:["mp"]},
+  masas:   {label:"Masa",           emoji:"🥖", color:"#A78BFA", idsField:"masa_ids",    src:["mp"]},
+  semi:    {label:"Semielaborado",  emoji:"🥟", color:"#F5D020", idsField:"semi_ids",    src:["rellenos","masas"]},
+  pt:      {label:"Producto term.", emoji:"✅", color:"#A8C820", idsField:null,          src:["semi"]},
+};
+// nombre legible de un ítem según su store
+const itemName=(store,i)=> store==="mp" ? i.material : i.tipo;
+const itemTs=i=> i.timestamp||i.timestamp_inicio||"";
+// devuelve el store al que pertenece un id (busca en todas las tablas)
+const findItem=(id)=>{ for(const s of STORES_ORDER){ const it=LS.get(s).find(x=>x.id===id); if(it) return {store:s,item:it}; } return null; };
+
+// HACIA ATRÁS: qué consumió este ítem (sus fuentes). Devuelve por store.
+const traceBack=(store,item)=>{
+  const meta=STORE_META[store];
+  const res={};
+  if(!meta.src) return res;
+  const fieldByStore={mp:"mp_ids",rellenos:"relleno_ids",masas:"masa_ids",semi:"semi_ids"};
+  meta.src.forEach(srcStore=>{
+    const f=fieldByStore[srcStore];
+    const ids=item[f]||[];
+    const items=LS.get(srcStore).filter(x=>ids.includes(x.id));
+    if(items.length) res[srcStore]=items;
+  });
+  return res;
+};
+
+// HACIA ADELANTE: en qué se usó este ítem (sus destinos). Busca quién lo tiene en sus _ids.
+const traceForward=(store,item)=>{
+  const fieldByStore={mp:"mp_ids",rellenos:"relleno_ids",masas:"masa_ids",semi:"semi_ids"};
+  const f=fieldByStore[store];
+  if(!f) return {}; // pt no tiene destino interno
+  const res={};
+  // posibles destinos: rellenos/masas consumen mp; semi consume rellenos/masas; pt consume semi
+  const destByStore={mp:["rellenos","masas"],rellenos:["semi"],masas:["semi"],semi:["pt"]};
+  (destByStore[store]||[]).forEach(destStore=>{
+    const items=LS.get(destStore).filter(x=>(x[f]||[]).includes(item.id));
+    if(items.length) res[destStore]=items;
+  });
+  return res;
+};
+
+// Construye la descendencia completa hacia adelante (todos los niveles hasta PT)
+const forwardChain=(store,item)=>{
+  const out={rellenos:[],masas:[],semi:[],pt:[]};
+  const seen=new Set();
+  const walk=(s,it)=>{
+    const fwd=traceForward(s,it);
+    Object.entries(fwd).forEach(([ds,items])=>{
+      items.forEach(d=>{
+        const key=ds+":"+d.id; if(seen.has(key))return; seen.add(key);
+        out[ds].push(d); walk(ds,d);
+      });
+    });
+  };
+  walk(store,item);
+  // dedup
+  Object.keys(out).forEach(k=>{ const m={}; out[k].forEach(x=>m[x.id]=x); out[k]=Object.values(m); });
+  return out;
+};
+
+// Construye los ancestros completos hacia atrás (todos los niveles hasta MP)
+const backwardChain=(store,item)=>{
+  const out={semi:[],rellenos:[],masas:[],mp:[]};
+  const seen=new Set();
+  const walk=(s,it)=>{
+    const bk=traceBack(s,it);
+    Object.entries(bk).forEach(([ss,items])=>{
+      items.forEach(a=>{
+        const key=ss+":"+a.id; if(seen.has(key))return; seen.add(key);
+        if(out[ss]) out[ss].push(a); walk(ss,a);
+      });
+    });
+  };
+  walk(store,item);
+  Object.keys(out).forEach(k=>{ const m={}; out[k].forEach(x=>m[x.id]=x); out[k]=Object.values(m); });
+  return out;
+};
+
+
+/* QUIZ */
+const QUIZ=[
+  {q:"¿Con qué frecuencia mínima se deben lavar las manos?",opts:["Cada 2 horas","Antes y después de cada tarea crítica","Una vez por turno","Solo al inicio"],ok:1,exp:"BPM exige lavado antes y después de cada tarea crítica para evitar contaminación cruzada."},
+  {q:"¿T° mínima interna para carnes picadas según CAA?",opts:["63°C","70°C","75°C","85°C"],ok:2,exp:"El CAA establece 75°C internos para eliminar Salmonella y E.coli en carnes picadas."},
+  {q:"¿Qué significa PEPS?",opts:["Primero en entrar, primero en salir","Producto en estado perfecto","Proceso estándar productivo","Preservación eficiente"],ok:0,exp:"PEPS garantiza usar insumos más antiguos primero, reduciendo vencimientos."},
+  {q:"¿Zona de peligro de temperatura para bacterias?",opts:["0°C a 5°C","5°C a 60°C","10°C a 45°C","20°C a 80°C"],ok:1,exp:"Entre 5°C y 60°C las bacterias se multiplican aceleradamente."},
+  {q:"¿Qué documentación exige el CAA en trazabilidad?",opts:["Solo fecha de vencimiento","Origen MP, proceso y destino PT","Solo el lote del PT","Nombre del operario"],ok:1,exp:"CAA Art.18: trazabilidad completa — origen MP, proceso y destino del PT."},
+  {q:"¿Cuánto tiempo mínimo conservar registros?",opts:["6 meses","1 año","El doble de la vida útil","5 años"],ok:2,exp:"ANMAT: registros mínimo el doble de la vida útil del producto."},
+  {q:"¿Qué es un PCC en HACCP?",opts:["Punto de registro de T°","Punto donde se puede prevenir o eliminar un peligro","El ingreso de MP","El almacenamiento"],ok:1,exp:"PCC: punto donde se aplica control para prevenir/eliminar un peligro a niveles aceptables."},
+  {q:"¿Qué hacer ante una desviación de T° en proceso?",opts:["Continuar y registrar al final","Detener, registrar, evaluar y decidir","Elevar T° para compensar","Esperar que se normalice"],ok:1,exp:"Ante desvío: DETENER → REGISTRAR → EVALUAR → DECIDIR. Registro obligatorio."},
+  {q:"¿EPI obligatorio en zona de elaboración?",opts:["Cualquier ropa limpia","Ambo, cofia, calzado cerrado, sin accesorios","Solo guantes","Delantal y guantes"],ok:1,exp:"BPM: ambo claro, cofia total, calzado cerrado antideslizante, sin accesorios."},
+  {q:"¿Cuándo retirar un producto sospechoso?",opts:["Al final del turno","Inmediatamente — cuarentena y análisis","Solo si hay daño visible","Nunca, cocción elimina todo"],ok:1,exp:"Sospecha → retiro INMEDIATO, cuarentena, análisis y decisión documentada."},
+  {q:"¿Qué es la contaminación cruzada?",opts:["Mezclar dos productos terminados","Transferencia de contaminantes de un alimento/superficie a otro","Cocinar a baja temperatura","Usar dos heladeras distintas"],ok:1,exp:"Es el paso de microorganismos o sustancias de un alimento, superficie o utensilio a otro. Se previene separando crudos de cocidos y con higiene."},
+  {q:"¿A qué temperatura debe mantenerse la cadena de frío de un congelado?",opts:["0°C o menos","-5°C o menos","-18°C o menos","-40°C o menos"],ok:2,exp:"Los alimentos congelados deben conservarse a -18°C o menos para frenar el desarrollo microbiano."},
+  {q:"¿Qué tabla de color se usa para cortar carne cruda y evitar cruce?",opts:["Verde","Roja","Amarilla","Azul"],ok:1,exp:"El código de colores común asigna la tabla roja a carnes crudas; verde a vegetales, amarilla a aves cocidas, azul a pescado."},
+  {q:"¿Cada cuánto se recomienda calibrar/verificar los termómetros?",opts:["Una vez al año","Nunca, vienen calibrados","Periódicamente y ante sospecha de error","Solo cuando se rompen"],ok:2,exp:"Los instrumentos de medición deben verificarse periódicamente para garantizar lecturas confiables en los PCC."},
+  {q:"¿Qué se hace primero al recibir materia prima?",opts:["Guardarla rápido en cámara","Controlar T°, integridad y documentación","Abrir el envase y probar","Mandarla directo a producción"],ok:1,exp:"La recepción exige verificar temperatura, estado del envase, vencimiento y remito antes de aceptar el material."},
+  {q:"¿Qué significan las siglas BPM?",opts:["Buenas Prácticas de Manufactura","Bacterias Por Mililitro","Balance Productivo Mensual","Buen Proceso de Mezcla"],ok:0,exp:"BPM son las Buenas Prácticas de Manufactura: condiciones y procedimientos básicos para producir alimentos seguros."},
+  {q:"¿Qué hacer con un alimento que cayó al piso?",opts:["Lavarlo y usarlo","Descartarlo","Usarlo si pasaron menos de 5 segundos","Cocinarlo más tiempo"],ok:1,exp:"Lo caído al piso se descarta. La 'regla de los 5 segundos' es un mito sin respaldo científico."},
+  {q:"¿Por qué es importante registrar el lote de cada materia prima?",opts:["Por costumbre","Para poder rastrear y retirar productos ante un problema","Para contar stock","No es importante"],ok:1,exp:"La trazabilidad por lote permite un retiro de mercado dirigido si se detecta un peligro, sin afectar toda la producción."},
+  {q:"¿Qué es un alérgeno y por qué declararlo?",opts:["Un conservante","Una sustancia que puede causar reacción adversa en personas sensibles","Un tipo de bacteria","Un aditivo de color"],ok:1,exp:"Los alérgenos (leche, huevo, gluten, frutos secos, etc.) deben declararse porque pueden provocar reacciones graves en personas sensibles."},
+  {q:"¿Cómo se deben almacenar productos crudos respecto de los cocidos en cámara?",opts:["Crudos arriba, cocidos abajo","Cocidos arriba, crudos abajo","Todo junto","En la misma bandeja"],ok:1,exp:"Los cocidos van arriba y los crudos abajo para que el goteo de crudos no contamine lo ya cocido."},
+  {q:"¿Qué indica una fecha de vencimiento?",opts:["Cuándo se fabricó","Hasta cuándo el producto mantiene seguridad y calidad","Cuándo se vendió","La fecha de ingreso a planta"],ok:1,exp:"El vencimiento marca el límite hasta el cual el producto conserva sus condiciones de seguridad y calidad si se almacenó bien."},
+  {q:"¿Qué documento describe paso a paso cómo limpiar y desinfectar un equipo?",opts:["El POES","La factura","El remito","El manual de RRHH"],ok:0,exp:"Los POES (Procedimientos Operativos Estandarizados de Saneamiento) detallan cómo, con qué y cada cuánto limpiar y desinfectar."},
+  {q:"¿Qué se debe hacer ante un corte en la mano de un operario?",opts:["Seguir trabajando","Cubrir con vendaje impermeable y guante, o apartarlo de manipular alimentos","Lavar y continuar","Usar solo una curita común"],ok:1,exp:"Las heridas deben cubrirse con vendaje impermeable y guante; si no se puede asegurar, el operario no manipula alimentos."},
+  {q:"¿Cuál es el riesgo de descongelar a temperatura ambiente?",opts:["Ninguno","Que la superficie entre en zona de peligro mientras el centro sigue congelado","Que pierda sabor","Que se ponga muy frío"],ok:1,exp:"Descongelar al ambiente deja la superficie en la zona de peligro (5-60°C) favoreciendo bacterias. Se descongela en heladera."},
+];
+
+// Para cada intento se eligen N preguntas al azar de todo el banco
+const QUIZ_N = 10;
+const pickQuiz = ()=>{ const a=[...QUIZ]; for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a.slice(0,Math.min(QUIZ_N,a.length)); };
+
+/* CSS */
+const css={
+  card:{background:B.card,border:`1px solid ${B.border}`,borderRadius:12},
+  btn:{background:B.accent,color:"#0A1A0C",border:"none",borderRadius:9,padding:"12px 16px",fontSize:15,fontWeight:800,cursor:"pointer",width:"100%"},
+  btnSm:{background:B.card,border:`1px solid ${B.border}`,color:B.muted,borderRadius:7,padding:"6px 12px",fontSize:12,cursor:"pointer"},
+  btnDanger:{background:"#3D0E0E",border:`1px solid ${B.red}50`,color:B.red,borderRadius:7,padding:"8px 12px",fontSize:13,cursor:"pointer",fontWeight:700},
+  input:{width:"100%",background:B.surface,border:`1px solid ${B.border}`,borderRadius:8,padding:"11px 12px",color:B.text,fontSize:14,outline:"none",boxSizing:"border-box"},
+  label:{color:B.muted,fontSize:12,display:"block",marginBottom:5},
+  sec:{color:B.accent,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:1,marginBottom:10},
+  back:{background:"none",border:"none",color:B.accent,fontSize:13,cursor:"pointer",padding:0,marginBottom:16,display:"block"},
+};
+const Field=({label,children,mb=14})=>(<div style={{marginBottom:mb}}>{label&&<label style={css.label}>{label}</label>}{children}</div>);
+const PermCheck=({label,checked,onToggle})=>(
+  <div onClick={onToggle} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",marginBottom:6,borderRadius:8,background:B.surface,cursor:"pointer",border:`1px solid ${checked?B.accent:B.border}`}}>
+    <div style={{width:20,height:20,borderRadius:5,border:`2px solid ${B.accent}`,background:checked?B.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#0A1A0C",fontWeight:800,fontSize:13,flexShrink:0}}>{checked?"✓":""}</div>
+    <span style={{color:B.text,fontSize:13}}>{label}</span>
+  </div>
+);
+const Badge=({color,bg,label})=>(<span style={{background:bg,color,border:`1px solid ${color}30`,borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700,whiteSpace:"nowrap"}}>{label}</span>);
+const statusBadge=s=>({
+  disponible:<Badge color={B.accent} bg={B.accentD} label="Disponible"/>,
+  usado:<Badge color={B.muted} bg={B.subtle} label="Usado"/>,
+  rechazado:<Badge color={B.red} bg="#3D0E0E" label="Rechazado"/>,
+  en_proceso:<Badge color={B.yellow} bg="#3D2C00" label="En proceso"/>,
+  terminado:<Badge color="#60A5FA" bg="#1E3A5F" label="Terminado"/>,
+  liberado:<Badge color={B.accent} bg={B.accentD} label="Liberado"/>,
+  cuarentena:<Badge color={B.red} bg="#3D0E0E" label="Cuarentena"/>,
+  anulado:<Badge color={B.muted} bg="#1A1A1A" label="Anulado"/>,
+})[s]||<Badge color={B.muted} bg={B.subtle} label={s||"—"}/>;
+
+/* Caja de anulación reutilizable */
+function AnulBox({item,user,store,onChange}){
+  const [show,setShow]=useState(false);
+  const [motivo,setMotivo]=useState("");
+  if(!item||item.estado==="anulado") return null;
+  const pend=item.anulacion&&item.anulacion.estado==="pendiente";
+  if(pend) return (
+    <div style={{...css.card,padding:"12px 14px",marginTop:10,borderColor:`${B.yellow}50`}}>
+      <div style={{color:B.yellow,fontWeight:700,fontSize:13}}>⏳ Anulación pendiente de aprobación</div>
+      <div style={{color:B.muted,fontSize:12,marginTop:4}}>Solicitada por {item.anulacion.solicitante} · {fmt(item.anulacion.solicitud_ts)}</div>
+      <div style={{color:B.text,fontSize:12,marginTop:4}}>Motivo: {item.anulacion.motivo_solicitud}</div>
+    </div>
+  );
+  const directo=can(user,"aprobar");
+  return (
+    <div style={{marginTop:10}}>
+      {item.anulacion&&item.anulacion.estado==="rechazada"&&(
+        <div style={{...css.card,padding:"10px 14px",marginBottom:8,borderColor:`${B.muted}40`}}>
+          <div style={{color:B.muted,fontSize:12}}>Anulación rechazada por {item.anulacion.resuelto_por}: {item.anulacion.motivo_resolucion}</div>
+        </div>
+      )}
+      {!show&&<button style={{...css.btnDanger,width:"100%"}} onClick={()=>setShow(true)}>{directo?"⛔ Anular registro":"⛔ Solicitar anulación"}</button>}
+      {show&&(
+        <div style={{...css.card,padding:14,borderColor:`${B.red}40`}}>
+          <div style={{color:B.red,fontWeight:700,marginBottom:8,fontSize:13}}>{directo?"Confirmar anulación":"Solicitar anulación"}</div>
+          {!directo&&<div style={{color:B.muted,fontSize:12,marginBottom:8}}>Un supervisor deberá aprobarla.</div>}
+          <textarea value={motivo} onChange={e=>setMotivo(e.target.value)} placeholder="Motivo obligatorio..." rows={3} style={{...css.input,resize:"vertical",marginBottom:10}}/>
+          <div style={{display:"flex",gap:8}}>
+            <button style={{...css.btn,flex:1,background:B.red,color:"#fff"}} onClick={()=>{ if(!motivo.trim())return alert("El motivo es obligatorio"); const upd=requestAnul(store,item.id,user,motivo); onChange(upd); setShow(false); setMotivo(""); }}>{directo?"Confirmar":"Enviar solicitud"}</button>
+            <button style={{...css.btnSm,flex:1}} onClick={()=>{setShow(false);setMotivo("");}}>Cancelar</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AnulInfo({item}){
+  if(!item||item.estado!=="anulado"||!item.anulacion) return null;
+  const a=item.anulacion;
+  return (
+    <div style={{background:"#3D0E0E",border:`1px solid ${B.red}40`,borderRadius:10,padding:"12px 14px",marginBottom:14}}>
+      <div style={{color:B.red,fontWeight:700,fontSize:13}}>⛔ Registro anulado</div>
+      <div style={{color:"#FCA5A5",fontSize:12,marginTop:4}}>Solicitó: {a.solicitante} · {fmt(a.solicitud_ts)}</div>
+      <div style={{color:"#FCA5A5",fontSize:12}}>Motivo: {a.motivo_solicitud}</div>
+      {a.resuelto_por&&<div style={{color:B.muted,fontSize:11,marginTop:4}}>Resuelto por {a.resuelto_por} · {fmt(a.resuelto_ts)}{a.motivo_resolucion?` — ${a.motivo_resolucion}`:""}</div>}
+    </div>
+  );
+}
+
+/* LOGIN */
+function Login({onLogin,syncErr}){
+  const [usr,setUsr]=useState(""),[pw,setPw]=useState(""),[err,setErr]=useState("");
+  // trim(): los teclados móviles suelen agregar un espacio final al autocompletar
+  const go=()=>{ const f=LS.get("users").find(u=>u.usr===usr.trim()&&u.pw===pw.trim()); if(f) onLogin(f); else setErr("Usuario o contraseña incorrectos"); };
+  return (
+    <div style={{minHeight:"100vh",background:B.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{...css.card,width:"100%",maxWidth:340,padding:32}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <img src={B.logo} alt="Chefexprés" style={{height:52,objectFit:"contain",marginBottom:12}} onError={e=>e.target.style.display="none"}/>
+          <div style={{color:B.accent,fontWeight:800,fontSize:18}}>Trazabilidad</div>
+          <div style={{color:B.muted,fontSize:12,marginTop:3}}>Godoy Cruz, Mendoza · <span style={{color:ENV==="testing"?B.yellow:B.accent,fontWeight:700}}>{ENV==="testing"?"TESTING":"PRODUCCIÓN"}</span></div>
+        </div>
+        {syncErr&&<div style={{background:"#3D2C00",color:B.yellow,fontSize:11,padding:"8px 10px",borderRadius:6,marginBottom:14}}>⚠️ No se pudo conectar con la base. Trabajando con datos locales; se sincronizará al recuperar conexión.</div>}
+        <Field label="Usuario"><input style={css.input} value={usr} onChange={e=>{setErr("");setUsr(e.target.value)}} onKeyDown={e=>e.key==="Enter"&&go()} placeholder="usuario"/></Field>
+        <Field label="Contraseña"><input style={css.input} type="password" value={pw} onChange={e=>{setErr("");setPw(e.target.value)}} onKeyDown={e=>e.key==="Enter"&&go()} placeholder="contraseña"/></Field>
+        {err&&<div style={{color:B.red,fontSize:12,marginBottom:12}}>{err}</div>}
+        <button style={css.btn} onClick={go}>Ingresar</button>
+      </div>
+    </div>
+  );
+}
+
+/* INGRESO MP */
+function IngresoMP({user}){
+  const cat=getCat();
+  const [list,setList]=useState(()=>LS.get("mp"));
+  const F0={proveedor:cat.mp_proveedores[0]||"",material:cat.mp_materiales[0]||"",lote:"",remito:"",cantidad:"",unidad:cat.mp_unidades[0]||"kg",fecha_vto:"",obs:"",retrasada:false,ts_ingreso:nowDTL(),condiciones:""};
+  const [form,setForm]=useState(F0);
+  const [view,setView]=useState("list");
+  const [sel,setSel]=useState(null);
+  const [q,setQ]=useState("");
+  const u=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+  const tog=k=>()=>setForm(p=>({...p,[k]:!p[k]}));
+  const delay=form.ts_ingreso?Math.round((Date.now()-new Date(form.ts_ingreso))/60000):0;
+  const refresh=upd=>{setList(upd);setSel(upd.find(i=>i.id===sel?.id)||null);};
+
+  const save=()=>{
+    if(!form.proveedor||!form.material||!form.lote||!form.cantidad) return alert("Completá los campos obligatorios");
+    if(!(parseFloat(form.cantidad)>0)) return alert("La cantidad debe ser mayor a cero");
+    if(form.retrasada&&new Date(form.ts_ingreso)>new Date()) return alert("La fecha de ingreso real no puede ser futura");
+    // Aviso de lote duplicado (mismo material + mismo lote, no anulado)
+    const dup=list.find(i=>i.estado!=="anulado"&&i.material===form.material&&(i.lote||"").toLowerCase()===form.lote.toLowerCase());
+    if(dup && !window.confirm(`Ya existe un ingreso de "${form.material}" con el lote "${form.lote}". ¿Cargar igual?`)) return;
+    const tc=now(), ti=form.retrasada?new Date(form.ts_ingreso).toISOString():tc;
+    const item={id:uid(),timestamp:ti,ts_carga:tc,retrasada:form.retrasada,demora_min:form.retrasada?Math.round((new Date(tc)-new Date(ti))/60000):0,condiciones:form.condiciones,proveedor:form.proveedor,material:form.material,lote:form.lote,remito:form.remito||null,cantidad:parseFloat(form.cantidad),unidad:form.unidad,fecha_vto:form.fecha_vto||null,obs:form.obs,cantidad_consumida:null,cantidad_scrap:null,unidad_scrap:null,operario:user.nombre,estado:"disponible",anulacion:null};
+    const upd=[item,...list]; LS.set("mp",upd); setList(upd); setForm({...F0,ts_ingreso:nowDTL()}); setView("list"); pushRows("mp",[item]);
+  };
+  const cambiar=(id,estado)=>{ const upd=list.map(i=>i.id===id?{...i,estado}:i); LS.set("mp",upd); refresh(upd); pushRows("mp",upd.filter(i=>i.id===id)); };
+
+  if(view==="form") return (
+    <div>
+      <button style={css.back} onClick={()=>setView("list")}>← Volver</button>
+      <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:20}}>📦 Nuevo ingreso MP</div>
+      <Field label="Proveedor *"><select style={css.input} value={form.proveedor} onChange={u("proveedor")}>{cat.mp_proveedores.map(p=><option key={p}>{p}</option>)}</select></Field>
+      <Field label="Material *"><select style={css.input} value={form.material} onChange={u("material")}>{cat.mp_materiales.map(m=><option key={m}>{m}</option>)}</select></Field>
+      <div style={{display:"flex",gap:10}}>
+        <div style={{flex:2}}><Field label="Lote MP *" mb={6}><input style={css.input} value={form.lote} onChange={u("lote")} placeholder="Lote del proveedor"/></Field></div>
+        <div style={{flex:1}}><Field label="Cant. *" mb={6}><input style={css.input} type="number" value={form.cantidad} onChange={u("cantidad")}/></Field></div>
+        <div style={{flex:1}}><Field label="Unidad" mb={6}><select style={css.input} value={form.unidad} onChange={u("unidad")}>{cat.mp_unidades.map(x=><option key={x}>{x}</option>)}</select></Field></div>
+      </div>
+      <div style={{marginBottom:14}}><button type="button" onClick={()=>setForm(p=>({...p,lote:nextLote("mp",form.material)}))} style={{...css.btnSm,fontSize:11,padding:"5px 10px"}}>🏷️ No trae lote — generar interno</button></div>
+      <Field label="Remito (opcional)"><input style={css.input} value={form.remito} onChange={u("remito")} placeholder="N° de remito del proveedor"/></Field>
+      <Field label="Fecha de vencimiento del material"><input style={css.input} type="date" value={form.fecha_vto} onChange={u("fecha_vto")}/></Field>
+      <Field label="Observaciones"><textarea style={{...css.input,resize:"vertical"}} rows={2} value={form.obs} onChange={u("obs")} placeholder="Condición de envase, detalles..."/></Field>
+      <div style={{...css.card,padding:"14px 16px",marginBottom:16,borderColor:form.retrasada?`${B.yellow}60`:B.border}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={tog("retrasada")}>
+          <div><div style={{color:B.text,fontWeight:700,fontSize:14}}>⏳ Carga retrasada</div><div style={{color:B.muted,fontSize:12,marginTop:2}}>El material llegó antes de registrarse</div></div>
+          <div style={{width:44,height:24,borderRadius:12,background:form.retrasada?B.yellow:B.subtle,position:"relative",flexShrink:0}}><div style={{position:"absolute",top:2,left:form.retrasada?22:2,width:20,height:20,borderRadius:"50%",background:"#fff",transition:"left 0.2s"}}/></div>
+        </div>
+        {form.retrasada?(
+          <div style={{marginTop:14}}>
+            <Field label="Hora y fecha real de ingreso"><input style={css.input} type="datetime-local" value={form.ts_ingreso} onChange={u("ts_ingreso")}/></Field>
+            {delay>0&&<div style={{background:`${B.yellow}15`,border:`1px solid ${B.yellow}40`,borderRadius:8,padding:"8px 12px",marginBottom:12}}><div style={{color:B.yellow,fontSize:12,fontWeight:700}}>⏱ Demora: {delay<60?`${delay} min`:`${Math.floor(delay/60)}h ${delay%60}m`}</div><div style={{color:B.muted,fontSize:11}}>Queda registrado para auditoría</div></div>}
+            <Field label="Condiciones al ingreso real"><textarea style={{...css.input,resize:"vertical"}} rows={3} value={form.condiciones} onChange={u("condiciones")} placeholder="T° de llegada, estado del envase, transportista, remito..."/></Field>
+          </div>
+        ):<div style={{color:B.muted,fontSize:12,marginTop:10}}>⏱ Se registra ahora: <b style={{color:B.text}}>{fmt(now())}</b></div>}
+      </div>
+      <button style={css.btn} onClick={save}>Registrar ingreso</button>
+    </div>
+  );
+
+  if(view==="detail"&&sel) return (
+    <div>
+      <button style={css.back} onClick={()=>setView("list")}>← Volver</button>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+        <div><div style={{color:B.text,fontSize:18,fontWeight:800}}>{sel.material}</div><div style={{color:B.muted,fontSize:12}}>Lote MP: {sel.lote}</div></div>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>{statusBadge(sel.estado)}{sel.retrasada&&<Badge color={B.yellow} bg={`${B.yellow}15`} label="⏳ Retrasada"/>}</div>
+      </div>
+      <AnulInfo item={sel}/>
+      {sel.retrasada&&(
+        <div style={{background:`${B.yellow}10`,border:`1px solid ${B.yellow}40`,borderRadius:10,padding:"12px 14px",marginBottom:14}}>
+          <div style={{color:B.yellow,fontWeight:700,fontSize:13,marginBottom:8}}>⏳ Carga retrasada</div>
+          <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+            <div><div style={{color:B.muted,fontSize:10}}>Ingreso real</div><div style={{color:B.text,fontWeight:700,fontSize:13}}>{fmt(sel.timestamp)}</div></div>
+            <div><div style={{color:B.muted,fontSize:10}}>Cargado</div><div style={{color:B.text,fontWeight:700,fontSize:13}}>{fmt(sel.ts_carga)}</div></div>
+            <div><div style={{color:B.muted,fontSize:10}}>Demora</div><div style={{color:B.yellow,fontWeight:700,fontSize:13}}>{sel.demora_min<60?`${sel.demora_min}m`:`${Math.floor(sel.demora_min/60)}h`}</div></div>
+          </div>
+          {sel.condiciones&&<div style={{marginTop:10,color:B.text,fontSize:13}}><span style={{color:B.muted}}>Condiciones: </span>{sel.condiciones}</div>}
+        </div>
+      )}
+      {[["Proveedor",sel.proveedor],["Cantidad",`${sel.cantidad} ${sel.unidad}`],sel.remito&&["Remito",sel.remito],["Ingreso",fmt(sel.timestamp)],sel.fecha_vto&&["Vencimiento",sel.fecha_vto],["Cargado por",sel.operario]].filter(Boolean).map(([l,v])=>(
+        <div key={l} style={{...css.card,padding:"10px 14px",marginBottom:8,display:"flex",justifyContent:"space-between"}}><span style={{color:B.muted,fontSize:12}}>{l}</span><span style={{color:B.text,fontSize:13,fontWeight:700}}>{v}</span></div>
+      ))}
+      {sel.obs&&<div style={{...css.card,padding:"10px 14px",marginBottom:8,color:B.muted,fontSize:13}}>📝 {sel.obs}</div>}
+      {sel.estado==="disponible"&&<button style={{...css.btnDanger,width:"100%",marginTop:4}} onClick={()=>cambiar(sel.id,"rechazado")}>Rechazar material</button>}
+      <AnulBox item={sel} user={user} store="mp" onChange={refresh}/>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+        <div style={{color:B.text,fontSize:18,fontWeight:800}}>📦 Ingreso MP</div>
+        <button style={{...css.btnSm,color:B.accent,borderColor:B.accent+"40"}} onClick={()=>{setForm({...F0,ts_ingreso:nowDTL()});setView("form");}}>+ Nuevo</button>
+      </div>
+      {list.length===0&&<div style={{color:B.muted,textAlign:"center",padding:40}}>Sin registros aún.</div>}
+      {list.length>4&&<input value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Buscar por material, proveedor, lote, fecha u operario..." style={{...css.input,marginBottom:12}}/>}
+      {list.filter(item=>{ const t=q.toLowerCase().trim(); return !t||(`${item.material} ${item.proveedor} ${item.lote} ${item.operario||""} ${fechaBuscable(item.timestamp)}`).toLowerCase().includes(t); }).map(item=>{
+        const pend=item.anulacion&&item.anulacion.estado==="pendiente";
+        return (
+          <div key={item.id} onClick={()=>{setSel(item);setView("detail");}} style={{...css.card,padding:"13px 14px",marginBottom:10,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",opacity:item.estado==="anulado"?0.4:1,borderColor:pend?`${B.yellow}50`:item.retrasada?`${B.yellow}30`:item.estado==="anulado"?`${B.red}30`:B.border}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{color:B.text,fontWeight:700,fontSize:14}}>{item.material}{pend&&<span style={{color:B.yellow,fontSize:11}}> ⏳ anul. pend.</span>}</div>
+              <div style={{color:B.muted,fontSize:11,marginTop:2}}>{item.proveedor} · Lote {item.lote} · {item.cantidad}{item.unidad}</div>
+              <div style={{color:B.subtle,fontSize:11,marginTop:1}}>⏱ {fmt(item.timestamp)} · por {item.operario}</div>
+            </div>
+            <div style={{marginLeft:8}}>{statusBadge(item.estado)}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* PRODUCCIÓN (rellenos/masas/semi/pt) */
+function ProduccionScreen({user,cfg}){
+  const cat=getCat();
+  const tipos=cat[cfg.catKey]||[];
+  // form.sources = { [store]: { [itemId]: cantidadConsumida(string) } }
+  const makeF0=()=>({tipo:tipos[0]||"",lote:"",unidad:cfg.unidades[0],obs:"",fecha_vto:"",sources:Object.fromEntries(cfg.sources.map(s=>[s.store,{}]))});
+  const [items,setItems]=useState(()=>LS.get(cfg.store));
+  const [view,setView]=useState("list");
+  const [sel,setSel]=useState(null);
+  const [form,setForm]=useState(makeF0);
+  const [finishing,setFinishing]=useState(false);  // mostrando input de cantidad producida
+  const [finQty,setFinQty]=useState("");            // cantidad producida (al terminar)
+  const uf=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+  const togSrc=(sk,id)=>setForm(p=>{ const cur={...p.sources[sk]}; if(id in cur) delete cur[id]; else cur[id]=""; return {...p,sources:{...p.sources,[sk]:cur}}; });
+  const setSrcQty=(sk,id,val)=>setForm(p=>({...p,sources:{...p.sources,[sk]:{...p.sources[sk],[id]:val}}}));
+  const refresh=upd=>{setItems(upd);setSel(upd.find(i=>i.id===sel?.id)||null);};
+
+  const save=()=>{
+    if(!form.tipo) return alert("No hay tipos configurados. Pedí al admin que los cargue en Configuración.");
+    if(!form.lote) return alert("Completá el número de lote");
+    // Aviso de lote duplicado en esta etapa (no anulado)
+    const dup=items.find(i=>i.estado!=="anulado"&&(i.lote||"").toLowerCase()===form.lote.toLowerCase());
+    if(dup && !window.confirm(`Ya existe un/a ${cfg.label.toLowerCase()} con el lote "${form.lote}". ¿Cargar igual?`)) return;
+    for(const s of cfg.sources){
+      for(const [,q] of Object.entries(form.sources[s.store]||{})){ if(!q||parseFloat(q)<=0) return alert(`Indicá la cantidad consumida de cada ${s.label.toLowerCase()} seleccionado/a.`); }
+    }
+    // Aviso si no se seleccionó ningún insumo: quedaría sin trazabilidad hacia atrás
+    const nSel=cfg.sources.reduce((a,s)=>a+Object.keys(form.sources[s.store]||{}).length,0);
+    if(nSel===0&&!window.confirm("No seleccionaste ningún insumo de origen. Este lote quedará SIN trazabilidad hacia atrás. ¿Continuar igual?")) return;
+    const consumed={}; const consumo={};
+    cfg.sources.forEach(s=>{
+      const entries=Object.entries(form.sources[s.store]||{});
+      consumed[s.idsField]=entries.map(([id])=>id);
+      entries.forEach(([id,q])=>{ consumo[id]={cantidad:parseFloat(q)||0,store:s.store}; });
+    });
+    const item={
+      id:uid(),timestamp_inicio:now(),timestamp_fin:null,
+      tipo:form.tipo,lote:form.lote,cantidad:null,unidad:form.unidad,  // cantidad se carga al terminar
+      obs:form.obs,fecha_vto:form.fecha_vto||null,
+      ...consumed,consumo,
+      cantidad_consumida:null,cantidad_scrap:null,unidad_scrap:null,
+      operario:user.nombre,estado:"en_proceso",anulacion:null,
+    };
+    const upd=[item,...items]; LS.set(cfg.store,upd); setItems(upd); setForm(makeF0()); setView("list"); pushRows(cfg.store,[item]);
+  };
+  // disponibilidad de un ítem fuente: cantidad si está cargada, null si aún en proceso
+  const srcAvail=item=> typeof item.cantidad==="number"?item.cantidad:null;
+  // terminar = registrar cantidad real producida + cerrar contador
+  const finalizar=(id,cant)=>{ const upd=items.map(i=>i.id===id?{...i,cantidad:parseFloat(cant),timestamp_fin:now(),estado:"terminado"}:i); LS.set(cfg.store,upd); refresh(upd); setFinishing(false); setFinQty(""); pushRows(cfg.store,upd.filter(i=>i.id===id)); };
+  const cambiar=(id,estado)=>{ const upd=items.map(i=>i.id===id?{...i,estado}:i); LS.set(cfg.store,upd); refresh(upd); pushRows(cfg.store,upd.filter(i=>i.id===id)); };
+  // Buscador por fuente: { [store]: "texto" }
+  const [busca,setBusca]=useState({});
+
+  if(view==="form") return (
+    <div>
+      <button style={css.back} onClick={()=>setView("list")}>← Volver</button>
+      <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:20}}>{cfg.emoji} Nuevo/a {cfg.label}</div>
+      {tipos.length===0&&<div style={{...css.card,padding:14,marginBottom:14,borderColor:`${B.amber}50`,color:B.amber,fontSize:13}}>⚠️ No hay tipos configurados. El admin debe cargarlos en Configuración.</div>}
+      <Field label="Tipo *"><select style={css.input} value={form.tipo} onChange={uf("tipo")}>{tipos.map(t=><option key={t}>{t}</option>)}</select></Field>
+      <div style={{display:"flex",gap:10}}>
+        <div style={{flex:2}}><Field label="N° Lote *"><input style={css.input} value={form.lote} onChange={uf("lote")} placeholder="CE-XX-001"/></Field></div>
+        <div style={{flex:1}}><Field label="Unidad"><select style={css.input} value={form.unidad} onChange={uf("unidad")}>{cfg.unidades.map(x=><option key={x}>{x}</option>)}</select></Field></div>
+      </div>
+      <div style={{color:B.muted,fontSize:12,marginBottom:14,marginTop:-4}}>ℹ️ La cantidad producida se carga al terminar (cuando lo pesan).</div>
+      {cfg.hasVto&&<Field label="Fecha de vencimiento"><input style={css.input} type="date" value={form.fecha_vto} onChange={uf("fecha_vto")}/></Field>}
+      {cfg.sources.map(src=>{
+        const q=(busca[src.store]||"").toLowerCase().trim();
+        // Disponibles, ordenados por más antiguo primero (PEPS)
+        let avail=LS.get(src.store).filter(src.avail);
+        const ts=i=>i.timestamp||i.timestamp_inicio||"";
+        avail.sort((a,b)=>ts(a)<ts(b)?-1:1);
+        if(q) avail=avail.filter(i=>(`${src.name(i)} ${i.lote||""}`).toLowerCase().includes(q));
+        const totalDisp=LS.get(src.store).filter(src.avail).length;
+        const vence=i=>{ if(!i.fecha_vto) return null; const d=Math.ceil((new Date(i.fecha_vto)-Date.now())/86400000); return d; };
+        return (
+          <div key={src.store}>
+            <div style={css.sec}>{src.emoji} {src.label}</div>
+            {totalDisp>3&&(
+              <input value={busca[src.store]||""} onChange={e=>setBusca(p=>({...p,[src.store]:e.target.value}))}
+                placeholder={`🔍 Buscar ${src.label.toLowerCase()} por nombre o lote...`}
+                style={{...css.input,marginBottom:10}}/>
+            )}
+            <div style={{color:B.subtle,fontSize:11,marginBottom:8}}>↑ Ordenados del más antiguo al más nuevo (consumí primero el de arriba — PEPS)</div>
+            {avail.length===0&&<div style={{color:B.muted,fontSize:13,marginBottom:12}}>{q?"Sin resultados para la búsqueda.":`Sin ${src.label.toLowerCase()} terminados disponibles. Solo se pueden consumir ítems ya finalizados.`}</div>}
+            {avail.map(item=>{
+              const sel=item.id in (form.sources[src.store]||{});
+              const qty=form.sources[src.store]?.[item.id]??"";
+              const disp=srcAvail(item); // number o null (si aún en proceso)
+              const exceso=sel&&qty!==""&&disp!==null&&parseFloat(qty)>disp;
+              const dv=vence(item);
+              return (
+                <div key={item.id} style={{...css.card,padding:"11px 13px",marginBottom:8,borderColor:exceso?B.amber:sel?B.accent:B.border}}>
+                  <div onClick={()=>togSrc(src.store,item.id)} style={{cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{color:B.text,fontSize:13,fontWeight:700}}>{src.name(item)}</div>
+                      <div style={{color:B.muted,fontSize:11}}>{src.sub(item)} · por {item.operario}</div>
+                      {item.fecha_vto&&<div style={{fontSize:11,marginTop:2,color:dv!==null&&dv<=7?B.amber:B.subtle}}>📅 Vence {item.fecha_vto}{dv!==null&&dv<=7?` · en ${dv}d`:""}</div>}
+                    </div>
+                    <div style={{width:20,height:20,borderRadius:4,border:`2px solid ${B.accent}`,background:sel?B.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",color:"#0A1A0C",fontSize:13,fontWeight:800,flexShrink:0}}>{sel?"✓":""}</div>
+                  </div>
+                  {sel&&(
+                    <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${B.border}`}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{color:B.muted,fontSize:12,whiteSpace:"nowrap"}}>Cantidad usada:</span>
+                        <input type="number" value={qty} onChange={e=>setSrcQty(src.store,item.id,e.target.value)} placeholder="0" style={{...css.input,padding:"7px 10px",width:90}}/>
+                        <span style={{color:B.muted,fontSize:12}}>{item.unidad}{disp!==null?` · disp. ${disp}`:""}</span>
+                      </div>
+                      {exceso&&<div style={{color:B.amber,fontSize:11,marginTop:6}}>⚠️ Estás usando {qty} pero el lote tenía {disp} {item.unidad}. Revisá si corresponde sumar otro lote.</div>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+      <Field label="Observaciones" mb={12}><textarea style={{...css.input,resize:"vertical"}} rows={2} value={form.obs} onChange={uf("obs")}/></Field>
+      <div style={{color:B.muted,fontSize:12,marginBottom:14}}>⏱ Inicio se registra automáticamente · por {user.nombre}</div>
+      <button style={css.btn} onClick={save}>Iniciar {cfg.label}</button>
+    </div>
+  );
+
+  if(view==="detail"&&sel) return (
+    <div>
+      <button style={css.back} onClick={()=>setView("list")}>← Volver</button>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+        <div><div style={{color:B.text,fontSize:18,fontWeight:800}}>{sel.tipo}</div><div style={{color:B.muted,fontSize:12}}>Lote: {sel.lote}</div></div>
+        {statusBadge(sel.estado)}
+      </div>
+      <AnulInfo item={sel}/>
+      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
+        {[["Cantidad producida",sel.cantidad!=null?`${sel.cantidad} ${sel.unidad}`:"Pendiente (al terminar)"],["Cargado por",sel.operario],["Inicio",fmt(sel.timestamp_inicio)],["Fin",sel.timestamp_fin?fmt(sel.timestamp_fin):"En curso"],sel.fecha_vto&&["Vto",sel.fecha_vto]].filter(Boolean).map(([l,v])=>(
+          <div key={l} style={{...css.card,padding:"9px 12px",flex:1,minWidth:100}}><div style={{color:B.muted,fontSize:10}}>{l}</div><div style={{color:B.text,fontWeight:700,fontSize:12}}>{v}</div></div>
+        ))}
+      </div>
+      {cfg.sources.map(src=>{
+        const ids=sel[src.idsField]||[]; if(!ids.length) return null;
+        const si=LS.get(src.store).filter(i=>ids.includes(i.id));
+        return (
+          <div key={src.store} style={{marginBottom:14}}>
+            <div style={{color:B.text,fontWeight:700,marginBottom:8,fontSize:14}}>{src.emoji} {src.label}</div>
+            {si.map(item=>{
+              const cons=sel.consumo&&sel.consumo[item.id];
+              return (
+                <div key={item.id} style={{...css.card,padding:"10px 12px",marginBottom:6,opacity:item.estado==="anulado"?0.5:1}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div><div style={{color:B.text,fontSize:13,fontWeight:700}}>{src.name(item)}</div><div style={{color:B.muted,fontSize:11}}>{src.sub(item)} · por {item.operario}</div></div>
+                    {cons&&<div style={{textAlign:"right",flexShrink:0,marginLeft:8}}><div style={{color:B.accent,fontWeight:800,fontSize:13}}>{cons.cantidad} {item.unidad}</div><div style={{color:B.muted,fontSize:10}}>usado</div></div>}
+                  </div>
+                  {item.estado==="anulado"&&<div style={{color:B.red,fontSize:11,marginTop:3}}>⛔ Anulado</div>}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+      {sel.obs&&<div style={{...css.card,padding:"10px 14px",marginBottom:8,color:B.muted,fontSize:13}}>📝 {sel.obs}</div>}
+      {sel.estado==="en_proceso"&&!finishing&&<button style={{...css.btn,background:B.green,color:"#fff",marginBottom:8}} onClick={()=>{setFinishing(true);setFinQty("");}}>✓ Terminar y pesar</button>}
+      {sel.estado==="en_proceso"&&finishing&&(
+        <div style={{...css.card,padding:14,marginBottom:8,borderColor:`${B.green}50`}}>
+          <div style={{color:B.green,fontWeight:700,fontSize:13,marginBottom:8}}>Cantidad real producida</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+            <input type="number" value={finQty} onChange={e=>setFinQty(e.target.value)} placeholder="0" autoFocus style={{...css.input,flex:1}}/>
+            <span style={{color:B.muted,fontSize:14,fontWeight:700}}>{sel.unidad}</span>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button style={{...css.btn,flex:1,background:B.green,color:"#fff"}} onClick={()=>{ if(!finQty||parseFloat(finQty)<=0) return alert("Ingresá la cantidad producida"); finalizar(sel.id,finQty); }}>Confirmar y cerrar</button>
+            <button style={{...css.btnSm,flex:1}} onClick={()=>{setFinishing(false);setFinQty("");}}>Cancelar</button>
+          </div>
+        </div>
+      )}
+      {sel.estado==="terminado"&&cfg.hasLib&&<div style={{display:"flex",gap:8,marginBottom:8}}><button style={{...css.btn,flex:1,background:B.green,color:"#fff"}} onClick={()=>cambiar(sel.id,"liberado")}>✓ Liberar</button><button style={{...css.btn,flex:1,background:B.red,color:"#fff"}} onClick={()=>cambiar(sel.id,"cuarentena")}>⚠ Cuarentena</button></div>}
+      {sel.estado==="cuarentena"&&cfg.hasLib&&(
+        <div style={{marginBottom:8}}>
+          <div style={{color:B.muted,fontSize:12,marginBottom:8}}>Resuelta la cuarentena, definí el destino del lote:</div>
+          <div style={{display:"flex",gap:8}}>
+            <button style={{...css.btn,flex:1,background:B.green,color:"#fff"}} onClick={()=>cambiar(sel.id,"liberado")}>✓ Liberar (análisis OK)</button>
+            <button style={{...css.btn,flex:1,background:B.card,color:B.text,border:`1px solid ${B.border}`}} onClick={()=>cambiar(sel.id,"terminado")}>↩ Volver a terminado</button>
+          </div>
+        </div>
+      )}
+      {sel.estado==="liberado"&&cfg.hasLib&&<button style={{...css.btnSm,width:"100%",marginBottom:8}} onClick={()=>cambiar(sel.id,"cuarentena")}>⚠ Enviar a cuarentena</button>}
+      <AnulBox item={sel} user={user} store={cfg.store} onChange={refresh}/>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+        <div style={{color:B.text,fontSize:18,fontWeight:800}}>{cfg.emoji} {cfg.label}s</div>
+        <button style={{...css.btnSm,color:B.accent,borderColor:B.accent+"40"}} onClick={()=>{setForm(makeF0());setView("form");}}>+ Nuevo/a</button>
+      </div>
+      {items.length===0&&<div style={{color:B.muted,textAlign:"center",padding:40}}>Sin registros aún.</div>}
+      {items.length>4&&<input value={busca.__list||""} onChange={e=>setBusca(p=>({...p,__list:e.target.value}))} placeholder={`🔍 Buscar ${cfg.label.toLowerCase()} por tipo, lote, fecha u operario...`} style={{...css.input,marginBottom:12}}/>}
+      {items.filter(item=>{ const t=(busca.__list||"").toLowerCase().trim(); return !t||(`${item.tipo} ${item.lote} ${item.operario||""} ${fechaBuscable(item.timestamp_inicio)}`).toLowerCase().includes(t); }).slice().sort((a,b)=>{ const pa=a.estado==="cuarentena"?0:1, pb=b.estado==="cuarentena"?0:1; return pa-pb; }).map(item=>{
+        const pend=item.anulacion&&item.anulacion.estado==="pendiente";
+        return (
+          <div key={item.id} onClick={()=>{setSel(item);setView("detail");}} style={{...css.card,padding:"13px 14px",marginBottom:10,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",opacity:item.estado==="anulado"?0.4:1,borderColor:pend?`${B.yellow}50`:item.estado==="anulado"?`${B.red}30`:item.estado==="cuarentena"?`${B.red}50`:B.border}}>
+            <div><div style={{color:B.text,fontWeight:700,fontSize:14}}>{item.tipo}{pend&&<span style={{color:B.yellow,fontSize:11}}> ⏳ anul. pend.</span>}</div><div style={{color:B.muted,fontSize:11,marginTop:2}}>Lote {item.lote}{item.cantidad!=null?` · ${item.cantidad} ${item.unidad}`:" · en proceso"}</div><div style={{color:B.subtle,fontSize:11,marginTop:1}}>⏱ {fmt(item.timestamp_inicio)} · por {item.operario}</div></div>
+            <div>{statusBadge(item.estado)}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ANULACIONES (aprobadores) */
+function Anulaciones({user}){
+  const [tick,setTick]=useState(0);
+  const [sel,setSel]=useState(null);
+  const [motivo,setMotivo]=useState("");
+  const pend=[];
+  ALL_STORES.forEach(s=>LS.get(s).filter(i=>i.anulacion&&i.anulacion.estado==="pendiente").forEach(i=>pend.push({store:s,item:i})));
+
+  const resolver=(aprobar)=>{
+    if(!motivo.trim()) return alert("Justificá tu decisión");
+    resolveAnul(sel.store,sel.item.id,user,aprobar,motivo);
+    setSel(null); setMotivo(""); setTick(t=>t+1);
+  };
+
+  if(sel){
+    const {store,item}=sel;
+    return (
+      <div>
+        <button style={css.back} onClick={()=>{setSel(null);setMotivo("");}}>← Volver</button>
+        <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:4}}>Resolver anulación</div>
+        <div style={{color:B.muted,fontSize:12,marginBottom:16}}>{STORE_LABEL[store]}</div>
+        <div style={{...css.card,padding:"12px 14px",marginBottom:14}}>
+          <div style={{color:B.text,fontWeight:700}}>{itemTitle(store,item)}</div>
+          <div style={{color:B.muted,fontSize:12,marginTop:2}}>{itemSub(store,item)}</div>
+          <div style={{color:B.subtle,fontSize:11,marginTop:2}}>Cargado por {item.operario}</div>
+        </div>
+        <div style={{...css.card,padding:"12px 14px",marginBottom:14,borderColor:`${B.yellow}40`}}>
+          <div style={{color:B.yellow,fontWeight:700,fontSize:13}}>Solicitud de {item.anulacion.solicitante}</div>
+          <div style={{color:B.muted,fontSize:11,marginTop:2}}>{fmt(item.anulacion.solicitud_ts)}</div>
+          <div style={{color:B.text,fontSize:13,marginTop:6}}>Motivo: {item.anulacion.motivo_solicitud}</div>
+        </div>
+        <Field label="Tu justificación *"><textarea style={{...css.input,resize:"vertical"}} rows={3} value={motivo} onChange={e=>setMotivo(e.target.value)} placeholder="Por qué aprobás o rechazás..."/></Field>
+        <div style={{display:"flex",gap:8}}>
+          <button style={{...css.btn,flex:1,background:B.red,color:"#fff"}} onClick={()=>resolver(true)}>✓ Aprobar anulación</button>
+          <button style={{...css.btn,flex:1,background:B.card,color:B.text,border:`1px solid ${B.border}`}} onClick={()=>resolver(false)}>✗ Rechazar</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:6}}>✋ Anulaciones pendientes</div>
+      <div style={{color:B.muted,fontSize:12,marginBottom:20}}>Solicitudes de operarios que requieren tu aprobación</div>
+      {pend.length===0&&<div style={{color:B.muted,textAlign:"center",padding:40}}>✅ No hay anulaciones pendientes.</div>}
+      {pend.map(({store,item})=>(
+        <div key={item.id} onClick={()=>setSel({store,item})} style={{...css.card,padding:"13px 14px",marginBottom:10,cursor:"pointer",borderColor:`${B.yellow}40`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div><div style={{color:B.text,fontWeight:700,fontSize:14}}>{itemTitle(store,item)}</div><div style={{color:B.muted,fontSize:11,marginTop:2}}>{STORE_LABEL[store]} · {itemSub(store,item)}</div></div>
+            <Badge color={B.yellow} bg="#3D2C00" label="Pendiente"/>
+          </div>
+          <div style={{color:B.subtle,fontSize:11,marginTop:6}}>Solicitó {item.anulacion.solicitante} · {item.anulacion.motivo_solicitud.slice(0,40)}{item.anulacion.motivo_solicitud.length>40?"…":""}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* CONFIGURACIÓN (solo admin) */
+function Configuracion(){
+  const [cat,setCat]=useState(()=>getCat());
+  const SECCIONES=[
+    {key:"mp_materiales",label:"Materiales (MP)",emoji:"📦"},
+    {key:"mp_proveedores",label:"Proveedores",emoji:"🏭"},
+    {key:"mp_unidades",label:"Unidades MP",emoji:"⚖️"},
+    {key:"rellenos",label:"Tipos de Relleno",emoji:"🥩"},
+    {key:"masas",label:"Tipos de Masa",emoji:"🥖"},
+    {key:"semi",label:"Tipos de Semielaborado",emoji:"🥟"},
+    {key:"pt",label:"Tipos de Producto Terminado",emoji:"✅"},
+    {key:"insumos_limpieza",label:"Insumos de Limpieza",emoji:"🧴"},
+  ];
+  const [openKey,setOpenKey]=useState(null);
+  const [nuevo,setNuevo]=useState("");
+  const [editIdx,setEditIdx]=useState(null);
+  const [editVal,setEditVal]=useState("");
+
+  const persist=c=>{ LS.set("catalogos",c); setCat({...c}); pushCatalogos(c); };
+  const add=key=>{ if(!nuevo.trim())return; const c={...cat,[key]:[...cat[key],nuevo.trim()]}; persist(c); setNuevo(""); };
+  const rename=(key,idx)=>{ if(!editVal.trim())return; const arr=[...cat[key]]; arr[idx]=editVal.trim(); persist({...cat,[key]:arr}); setEditIdx(null); setEditVal(""); };
+  // Cuenta cuántos registros usan un valor del catálogo (para avisar antes de borrar)
+  const usos=(key,valor)=>{
+    const map={mp_materiales:["mp","material"],mp_proveedores:["mp","proveedor"],rellenos:["rellenos","tipo"],masas:["masas","tipo"],semi:["semi","tipo"],pt:["pt","tipo"],insumos_limpieza:["insumos_limpieza","insumo"]};
+    const m=map[key]; if(!m) return 0;
+    return LS.get(m[0]).filter(i=>i.estado!=="anulado"&&i[m[1]]===valor).length;
+  };
+  const del=(key,idx)=>{
+    const valor=cat[key][idx];
+    const n=usos(key,valor);
+    const msg=n>0
+      ? `"${valor}" tiene ${n} registro(s) cargado(s). Si lo eliminás del catálogo, esos registros se conservan pero ya no podrás cargar nuevos con este valor. ¿Eliminar igual?`
+      : "¿Eliminar este ítem del catálogo?";
+    if(!window.confirm(msg))return;
+    persist({...cat,[key]:cat[key].filter((_,i)=>i!==idx)});
+  };
+
+  if(openKey){
+    const sec=SECCIONES.find(s=>s.key===openKey);
+    return (
+      <div>
+        <button style={css.back} onClick={()=>{setOpenKey(null);setNuevo("");setEditIdx(null);}}>← Volver a Configuración</button>
+        <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:16}}>{sec.emoji} {sec.label}</div>
+        <div style={{display:"flex",gap:8,marginBottom:16}}>
+          <input style={{...css.input,flex:1}} value={nuevo} onChange={e=>setNuevo(e.target.value)} onKeyDown={e=>e.key==="Enter"&&add(openKey)} placeholder="Nuevo ítem..."/>
+          <button style={{...css.btn,width:"auto",padding:"0 16px"}} onClick={()=>add(openKey)}>+ Agregar</button>
+        </div>
+        {cat[openKey].length===0&&<div style={{color:B.muted,textAlign:"center",padding:20}}>Catálogo vacío. Agregá el primer ítem.</div>}
+        {cat[openKey].map((item,idx)=>(
+          <div key={idx} style={{...css.card,padding:"10px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:8}}>
+            {editIdx===idx?(
+              <>
+                <input style={{...css.input,flex:1}} value={editVal} onChange={e=>setEditVal(e.target.value)} onKeyDown={e=>e.key==="Enter"&&rename(openKey,idx)}/>
+                <button style={{...css.btnSm,color:B.accent,borderColor:B.accent+"40"}} onClick={()=>rename(openKey,idx)}>✓</button>
+                <button style={css.btnSm} onClick={()=>{setEditIdx(null);setEditVal("");}}>✗</button>
+              </>
+            ):(
+              <>
+                <span style={{flex:1,color:B.text,fontSize:14}}>{item}</span>
+                <button style={css.btnSm} onClick={()=>{setEditIdx(idx);setEditVal(item);}}>✏️</button>
+                <button style={css.btnDanger} onClick={()=>del(openKey,idx)}>🗑</button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:6}}>⚙️ Configuración</div>
+      <div style={{color:B.muted,fontSize:12,marginBottom:20}}>Catálogos predeterminados. Los operarios cargan eligiendo de estas listas.</div>
+      {SECCIONES.map(s=>(
+        <div key={s.key} onClick={()=>{setOpenKey(s.key);setNuevo("");}} style={{...css.card,padding:"14px 16px",marginBottom:8,cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
+          <span style={{fontSize:22}}>{s.emoji}</span>
+          <div style={{flex:1}}><div style={{color:B.text,fontWeight:700,fontSize:14}}>{s.label}</div><div style={{color:B.muted,fontSize:12,marginTop:1}}>{cat[s.key]?.length||0} ítems</div></div>
+          <span style={{color:B.subtle,fontSize:20}}>›</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* USUARIOS (solo admin) */
+function Usuarios({currentUser}){
+  const [users,setUsers]=useState(()=>LS.get("users"));
+  const [view,setView]=useState("list");
+  const emptyPerm=()=>Object.fromEntries([...PERM_CARGA,...PERM_FUNC].map(p=>[p.k,false]));
+  const F0={usr:"",pw:"",nombre:"",permisos:emptyPerm()};
+  const [form,setForm]=useState(F0);
+  const [editId,setEditId]=useState(null);
+  const [err,setErr]=useState("");
+  const uf=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+  const togP=k=>setForm(p=>({...p,permisos:{...p.permisos,[k]:!p.permisos[k]}}));
+
+  const save=()=>{
+    if(!form.usr||!form.nombre||(!editId&&!form.pw)) return setErr("Completá nombre, usuario y contraseña");
+    if(!editId&&users.find(u=>u.usr===form.usr)) return setErr("Ese usuario ya existe");
+    let upd;
+    if(editId) upd=users.map(u=>u.id===editId?{...u,nombre:form.nombre,permisos:form.permisos,pw:form.pw||u.pw}:u);
+    else upd=[...users,{id:uid(),usr:form.usr,pw:form.pw,nombre:form.nombre,esAdmin:false,permisos:form.permisos}];
+    LS.set("users",upd); setUsers(upd);
+    const saved = editId ? upd.find(u=>u.id===editId) : upd[upd.length-1];
+    if(saved) pushUser(saved);
+    setForm(F0); setEditId(null); setErr(""); setView("list");
+  };
+  const del=id=>{ if(id===currentUser.id)return alert("No podés eliminar tu propio usuario"); if(!window.confirm("¿Eliminar usuario?"))return; const upd=users.filter(u=>u.id!==id); LS.set("users",upd); setUsers(upd); syncOp({fn:"deluser",id}); };
+  const startEdit=u=>{ setForm({usr:u.usr,pw:"",nombre:u.nombre,permisos:{...emptyPerm(),...u.permisos}}); setEditId(u.id); setErr(""); setView("form"); };
+
+  if(view==="form") return (
+    <div>
+      <button style={css.back} onClick={()=>{setView("list");setEditId(null);setForm(F0);setErr("");}}>← Volver</button>
+      <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:20}}>{editId?"Editar usuario":"Nuevo usuario"}</div>
+      <Field label="Nombre completo *"><input style={css.input} value={form.nombre} onChange={uf("nombre")} placeholder="Ej: María González"/></Field>
+      <Field label="Usuario (login) *"><input style={{...css.input,opacity:editId?0.6:1}} value={form.usr} onChange={uf("usr")} placeholder="mgonzalez" disabled={!!editId}/></Field>
+      <Field label={editId?"Nueva contraseña (vacío = no cambiar)":"Contraseña *"}><input style={css.input} type="password" value={form.pw} onChange={uf("pw")} placeholder="contraseña"/></Field>
+      <div style={css.sec}>Permisos de carga</div>
+      {PERM_CARGA.map(p=><PermCheck key={p.k} label={p.label} checked={!!form.permisos[p.k]} onToggle={()=>togP(p.k)}/>)}
+      <div style={{...css.sec,marginTop:14}}>Permisos de función</div>
+      {PERM_FUNC.map(p=><PermCheck key={p.k} label={p.label} checked={!!form.permisos[p.k]} onToggle={()=>togP(p.k)}/>)}
+      <div style={{color:B.muted,fontSize:11,marginTop:8,marginBottom:14,padding:"8px 12px",background:B.surface,borderRadius:8}}>ℹ️ La configuración de catálogos y la gestión de usuarios son exclusivas del administrador y no se pueden delegar.</div>
+      {err&&<div style={{color:B.red,fontSize:12,marginBottom:12}}>{err}</div>}
+      <button style={css.btn} onClick={save}>{editId?"Guardar cambios":"Crear usuario"}</button>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+        <div style={{color:B.text,fontSize:18,fontWeight:800}}>👥 Usuarios</div>
+        <button style={{...css.btnSm,color:B.accent,borderColor:B.accent+"40"}} onClick={()=>{setForm(F0);setEditId(null);setView("form");}}>+ Nuevo</button>
+      </div>
+      {users.map(u=>{
+        const activos=[...PERM_CARGA,...PERM_FUNC].filter(p=>u.permisos&&u.permisos[p.k]).length;
+        return (
+          <div key={u.id} style={{...css.card,padding:"13px 14px",marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div><div style={{color:B.text,fontWeight:700,fontSize:14}}>{u.nombre}{u.id===currentUser.id&&<span style={{color:B.muted,fontSize:11}}> (vos)</span>}</div><div style={{color:B.muted,fontSize:12,marginTop:2}}>@{u.usr}</div></div>
+              {u.esAdmin?<Badge color={B.yellow} bg="#3D2C00" label="Administrador"/>:<Badge color={B.accent} bg={B.accentD} label={`${activos} permisos`}/>}
+            </div>
+            {!u.esAdmin&&(
+              <div style={{display:"flex",gap:8,marginTop:10}}>
+                <button style={{...css.btnSm,color:B.accent,borderColor:B.accent+"40"}} onClick={()=>startEdit(u)}>✏️ Editar</button>
+                {u.id!==currentUser.id&&<button style={css.btnDanger} onClick={()=>del(u.id)}>🗑 Eliminar</button>}
+              </div>
+            )}
+            {u.esAdmin&&<div style={{color:B.muted,fontSize:11,marginTop:8}}>Acceso total + configuración de catálogos. No editable.</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* TRAZABILIDAD */
+function Trazabilidad(){
+  const [q,setQ]=useState("");
+  const [sel,setSel]=useState(null); // {store,item}
+
+  // Buscador universal: por nombre, lote o remito, en todas las etapas
+  const resultados=()=>{
+    const t=q.toLowerCase().trim();
+    if(!t) return [];
+    const out=[];
+    STORES_ORDER.forEach(store=>{
+      LS.get(store).forEach(i=>{
+        const hay=`${itemName(store,i)} ${i.lote||""} ${i.remito||""}`.toLowerCase();
+        if(hay.includes(t)) out.push({store,item:i});
+      });
+    });
+    return out.sort((a,b)=>itemTs(b.item)<itemTs(a.item)?-1:1).slice(0,40);
+  };
+
+  // ---- Vista de cadena bidireccional de un ítem ----
+  if(sel){
+    const {store,item}=sel;
+    const meta=STORE_META[store];
+    const back=backwardChain(store,item);   // {semi,rellenos,masas,mp}
+    const fwd=forwardChain(store,item);     // {rellenos,masas,semi,pt}
+
+    // mapa de consumo (cuánto se usó de cada ítem), recorriendo todos los que tienen consumo
+    const consMap={};
+    [...LS.get("rellenos"),...LS.get("masas"),...LS.get("semi"),...LS.get("pt")].forEach(p=>{
+      if(p.consumo) Object.entries(p.consumo).forEach(([id,c])=>{ consMap[id]=(consMap[id]||0)+(c.cantidad||0); });
+    });
+    const usado=i=>consMap[i.id]?` · usado ${consMap[i.id]}${i.unidad||""}`:"";
+
+    const Item=({store,i,dim})=>(
+      <div style={{...css.card,padding:"10px 12px",marginBottom:6,borderColor:`${STORE_META[store].color}40`,opacity:i.estado==="anulado"?0.45:1}}>
+        {i.estado==="anulado"&&<div style={{color:B.red,fontSize:11,marginBottom:3}}>⛔ Anulado</div>}
+        <div style={{color:B.text,fontSize:13,fontWeight:700}}>{STORE_META[store].emoji} {itemName(store,i)}</div>
+        <div style={{color:B.muted,fontSize:11,marginTop:2}}>
+          {store==="mp"?`${i.proveedor} · `:""}Lote {i.lote||"—"}{i.remito?` · Rem ${i.remito}`:""} · {store==="mp"?`${i.cantidad}${i.unidad}`:qtyTxt(i)}{dim?usado(i):""}
+        </div>
+        <div style={{color:B.subtle,fontSize:11,marginTop:2}}>👤 {i.operario} · {fmt(itemTs(i))}</div>
+      </div>
+    );
+    const Section=({title,arrow,stores,data,dim})=>{
+      const has=stores.some(s=>(data[s]||[]).length);
+      if(!has) return null;
+      return (
+        <div style={{marginBottom:10}}>
+          <div style={{color:B.subtle,fontSize:11,margin:"2px 0 8px 4px"}}>{arrow} {title}</div>
+          {stores.map(s=>(data[s]||[]).map(i=><Item key={s+i.id} store={s} i={i} dim={dim}/>))}
+        </div>
+      );
+    };
+
+    const generarPDF=()=>{
+      const esc=s=>String(s==null?"":s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+      const fila=cols=>`<tr>${cols.map(c=>`<td>${esc(c)}</td>`).join("")}</tr>`;
+      const rowsOf=(arr,store)=>arr.map(i=>fila([
+        STORE_META[store].label, itemName(store,i), i.lote||"—", i.remito||"—",
+        store==="mp"?`${i.cantidad??"—"} ${i.unidad||""}`:qtyTxt(i),
+        consMap[i.id]?`${consMap[i.id]} ${i.unidad||""}`:"—",
+        i.fecha_vto||"—", fmt(itemTs(i)), i.operario||"—", i.estado||"—"
+      ])).join("");
+      const tabla=(titulo,rows)=>rows?`<h3>${titulo}</h3><table><thead><tr><th>Etapa</th><th>Nombre</th><th>Lote</th><th>Remito</th><th>Producido</th><th>Usado</th><th>Vto</th><th>Fecha</th><th>Responsable</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table>`:"";
+      const secBack=[
+        rowsOf(back.semi||[],"semi"),rowsOf(back.rellenos||[],"rellenos"),
+        rowsOf(back.masas||[],"masas"),rowsOf(back.mp||[],"mp")
+      ].join("");
+      const secFwd=[
+        rowsOf(fwd.rellenos||[],"rellenos"),rowsOf(fwd.masas||[],"masas"),
+        rowsOf(fwd.semi||[],"semi"),rowsOf(fwd.pt||[],"pt")
+      ].join("");
+      const hoy=new Date().toLocaleString("es-AR");
+      const html=`<!doctype html><html><head><meta charset="utf-8"><title>Trazabilidad ${esc(item.lote)}</title>
+        <style>
+          *{font-family:Arial,Helvetica,sans-serif;box-sizing:border-box}
+          body{margin:0;padding:32px;color:#1a1a1a;font-size:12px}
+          .hdr{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #A8C820;padding-bottom:14px;margin-bottom:18px}
+          .hdr h1{margin:0;font-size:20px;color:#3a5a18}
+          .hdr .sub{color:#666;font-size:11px;margin-top:3px}
+          .empresa{text-align:right;font-size:11px;color:#444}
+          .resumen{background:#f4f7e8;border:1px solid #d4e08a;border-radius:6px;padding:12px 14px;margin-bottom:18px}
+          .resumen b{color:#3a5a18}
+          .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;margin-top:6px}
+          h3{color:#3a5a18;font-size:13px;margin:16px 0 6px;border-left:4px solid #A8C820;padding-left:8px}
+          table{width:100%;border-collapse:collapse;margin-bottom:8px}
+          th{background:#3a5a18;color:#fff;font-size:9.5px;text-align:left;padding:5px 6px}
+          td{border:1px solid #ddd;padding:4px 6px;font-size:9.5px}
+          tr:nth-child(even) td{background:#fafaf4}
+          .foot{margin-top:24px;border-top:1px solid #ccc;padding-top:12px;color:#888;font-size:10px;display:flex;justify-content:space-between}
+          .firma{margin-top:36px;display:flex;gap:60px}
+          .firma div{flex:1;border-top:1px solid #333;padding-top:5px;font-size:10px;text-align:center;color:#555}
+          @media print{body{padding:16px}}
+        </style></head><body>
+        <div class="hdr">
+          <div><h1>Reporte de Trazabilidad</h1><div class="sub">Cadena bidireccional · ${esc(meta.label)}</div></div>
+          <div class="empresa"><b>Chefexprés</b><br>Godoy Cruz, Mendoza<br>Emitido: ${esc(hoy)}</div>
+        </div>
+        <div class="resumen">
+          <div style="font-size:14px;margin-bottom:6px"><b>${esc(meta.label)}:</b> ${esc(itemName(store,item))} &nbsp;·&nbsp; <b>Lote:</b> ${esc(item.lote||"—")}</div>
+          <div class="grid">
+            ${store==="mp"?`<div><b>Proveedor:</b> ${esc(item.proveedor||"—")}</div><div><b>Remito:</b> ${esc(item.remito||"—")}</div>`:""}
+            <div><b>Cantidad:</b> ${esc(store==="mp"?`${item.cantidad} ${item.unidad}`:qtyTxt(item))}</div>
+            <div><b>Vencimiento:</b> ${esc(item.fecha_vto||"—")}</div>
+            <div><b>Estado:</b> ${esc(item.estado||"—")}</div>
+            <div><b>Responsable:</b> ${esc(item.operario||"—")}</div>
+            <div><b>Fecha:</b> ${esc(fmt(itemTs(item)))}</div>
+          </div>
+        </div>
+        ${secBack?`<h2 style="color:#3a5a18;font-size:15px;margin:14px 0 4px">↑ Hacia atrás (origen)</h2>${tabla("Insumos que lo componen",secBack)}`:""}
+        ${secFwd?`<h2 style="color:#3a5a18;font-size:15px;margin:18px 0 4px">↓ Hacia adelante (destino)</h2>${tabla("Productos donde se utilizó",secFwd)}`:""}
+        ${!secBack&&!secFwd?`<p style="color:#666">Este ítem no tiene cadena registrada (ni origen ni destino).</p>`:""}
+        <div class="firma"><div>Firma responsable de planta</div><div>Firma auditor / inspector</div></div>
+        <div class="foot"><span>Generado por sistema de trazabilidad Chefexprés</span><span>Lote ${esc(item.lote||"—")} · ${esc(hoy)}</span></div>
+        <script>window.onload=function(){window.print();}<\/script>
+      </body></html>`;
+      const w=window.open("","_blank");
+      if(!w){ alert("Permití las ventanas emergentes para generar el PDF."); return; }
+      w.document.write(html); w.document.close();
+    };
+
+    const hayBack=["semi","rellenos","masas","mp"].some(s=>(back[s]||[]).length);
+    const hayFwd=["rellenos","masas","semi","pt"].some(s=>(fwd[s]||[]).length);
+
+    return (
+      <div>
+        <button style={css.back} onClick={()=>setSel(null)}>← Volver al buscador</button>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:14}}>
+          <div><div style={{color:B.text,fontSize:16,fontWeight:800,marginBottom:2}}>Trazabilidad de {meta.label.toLowerCase()}</div><div style={{color:B.muted,fontSize:12}}>{itemName(store,item)} · Lote {item.lote||"—"}</div></div>
+          <button onClick={generarPDF} style={{...css.btn,width:"auto",padding:"9px 14px",fontSize:13,flexShrink:0}}>📄 Reporte PDF</button>
+        </div>
+
+        {/* HACIA ATRÁS */}
+        {hayBack&&<div style={{color:B.accent,fontSize:13,fontWeight:800,margin:"4px 0 10px"}}>↑ Hacia atrás — de dónde viene</div>}
+        <Section title="Semielaborados" arrow="•" stores={["semi"]} data={back} dim/>
+        <Section title="Rellenos y masas" arrow="•" stores={["rellenos","masas"]} data={back} dim/>
+        <Section title="Materias primas (origen)" arrow="•" stores={["mp"]} data={back} dim/>
+
+        {/* ÍTEM CENTRAL */}
+        <div style={{margin:"10px 0",padding:"4px 0"}}>
+          <div style={{color:B.subtle,fontSize:11,margin:"0 0 6px 4px"}}>◆ ítem trazado</div>
+          <div style={{...css.card,padding:"12px 14px",borderColor:meta.color,borderWidth:2,background:`${meta.color}12`}}>
+            <div style={{color:B.text,fontSize:14,fontWeight:800}}>{meta.emoji} {itemName(store,item)}</div>
+            <div style={{color:B.muted,fontSize:12,marginTop:3}}>{store==="mp"?`${item.proveedor} · `:""}Lote {item.lote||"—"}{item.remito?` · Remito ${item.remito}`:""} · {store==="mp"?`${item.cantidad}${item.unidad}`:qtyTxt(item)}{item.fecha_vto?` · Vto ${item.fecha_vto}`:""}</div>
+            <div style={{color:B.subtle,fontSize:11,marginTop:3}}>👤 {item.operario} · {fmt(itemTs(item))} · {statusBadge(item.estado)}</div>
+          </div>
+        </div>
+
+        {/* HACIA ADELANTE */}
+        {hayFwd&&<div style={{color:B.yellow,fontSize:13,fontWeight:800,margin:"14px 0 10px"}}>↓ Hacia adelante — a dónde fue</div>}
+        <Section title="Rellenos y masas" arrow="•" stores={["rellenos","masas"]} data={fwd}/>
+        <Section title="Semielaborados" arrow="•" stores={["semi"]} data={fwd}/>
+        <Section title="Productos terminados" arrow="•" stores={["pt"]} data={fwd}/>
+        {/* Gancho módulo ventas: cuando exista distribución, acá se mostrará el destino de venta */}
+        {hayFwd&&(fwd.pt||[]).length>0&&<div style={{...css.card,padding:"10px 12px",marginTop:4,borderColor:B.border,opacity:0.55}}><div style={{color:B.muted,fontSize:12}}>🚚 Distribución / Venta</div><div style={{color:B.subtle,fontSize:11,marginTop:2}}>Módulo de ventas no activo. Al activarlo, la cadena llegará hasta el cliente.</div></div>}
+
+        {!hayBack&&!hayFwd&&<div style={{color:B.muted,textAlign:"center",padding:30}}>Este ítem no tiene cadena registrada todavía.</div>}
+      </div>
+    );
+  }
+
+  // ---- Buscador ----
+  const res=resultados();
+  return (
+    <div>
+      <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:4}}>🔗 Trazabilidad</div>
+      <div style={{color:B.muted,fontSize:12,marginBottom:16}}>Buscá cualquier ítem por nombre, lote o remito y vé su cadena hacia atrás y hacia adelante.</div>
+      <input value={q} onChange={e=>setQ(e.target.value)} autoFocus placeholder="🔍 Ej: calabaza, SEM-20260613-01, remito 1234..." style={{...css.input,marginBottom:16}}/>
+      {!q.trim()&&<div style={{color:B.subtle,fontSize:12,textAlign:"center",padding:30}}>Escribí algo para empezar a buscar.<br/>Podés trazar materias primas, rellenos, masas, semielaborados o productos terminados.</div>}
+      {q.trim()&&res.length===0&&<div style={{color:B.muted,textAlign:"center",padding:30}}>Sin resultados para "{q}".</div>}
+      {res.map(({store,item})=>(
+        <div key={store+item.id} onClick={()=>setSel({store,item})} style={{...css.card,padding:"12px 14px",marginBottom:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",borderColor:`${STORE_META[store].color}30`}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{color:B.text,fontWeight:700,fontSize:13}}>{STORE_META[store].emoji} {itemName(store,item)}</div>
+            <div style={{color:B.muted,fontSize:11,marginTop:2}}>{STORE_META[store].label} · Lote {item.lote||"—"}{item.remito?` · Rem ${item.remito}`:""}</div>
+            <div style={{color:B.subtle,fontSize:11,marginTop:1}}>{fmt(itemTs(item))} · por {item.operario}</div>
+          </div>
+          <div style={{color:B.subtle,marginLeft:8}}>›</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* EFICIENCIA */
+function Eficiencia(){
+  const pts=LS.get("pt").filter(l=>l.timestamp_fin);
+  if(!pts.length) return <div><div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:20}}>📊 Eficiencia</div><div style={{color:B.muted,textAlign:"center",padding:40}}>Completá al menos una orden de PT para ver métricas.</div></div>;
+  const durs=pts.map(l=>diffM(l.timestamp_inicio,l.timestamp_fin));
+  const chain=pts.map(pt=>{ const {mp}=getChain(pt); const o=mp.reduce((a,m)=>!a||m.timestamp<a?m.timestamp:a,null); return o&&pt.timestamp_fin?diffM(o,pt.timestamp_fin):null; });
+  const prom=Math.round(durs.reduce((a,b)=>a+b,0)/durs.length);
+  const pctLib=Math.round(pts.filter(l=>l.estado==="liberado").length/pts.length*100);
+  const f2=m=>m===null?"—":m<60?`${m}m`:`${Math.floor(m/60)}h ${m%60}m`;
+  const maxD=Math.max(...durs);
+  return (
+    <div>
+      <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:20}}>📊 Eficiencia</div>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:20}}>
+        {[["Completados",pts.length,B.text],["T. prom elab.",f2(prom),B.accent],["Más rápido",f2(Math.min(...durs)),B.green],["Más lento",f2(maxD),B.yellow],["Tasa lib.",`${pctLib}%`,B.green],["Cuarentena",pts.filter(l=>l.estado==="cuarentena").length,B.red]].map(([l,v,c])=>(
+          <div key={l} style={{...css.card,padding:"13px 14px",flex:1,minWidth:100}}><div style={{color:B.muted,fontSize:10,textTransform:"uppercase",letterSpacing:1,marginBottom:5}}>{l}</div><div style={{color:c,fontSize:20,fontWeight:800}}>{v}</div></div>
+        ))}
+      </div>
+      <div style={{color:B.text,fontWeight:700,marginBottom:12}}>Duración por lote PT</div>
+      {pts.map((l,i)=>(
+        <div key={l.id} style={{...css.card,padding:"11px 13px",marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+            <div style={{color:B.text,fontSize:13,fontWeight:700}}>{l.tipo}</div>
+            <div style={{textAlign:"right"}}><span style={{color:B.accent,fontWeight:700,fontSize:13}}>{f2(durs[i])}</span>{chain[i]&&<div style={{color:B.muted,fontSize:10}}>cadena total: {f2(chain[i])}</div>}</div>
+          </div>
+          <div style={{background:B.surface,borderRadius:4,height:5,overflow:"hidden"}}><div style={{background:durs[i]>prom?B.yellow:B.accent,height:"100%",width:`${(durs[i]/maxD)*100}%`,borderRadius:4}}/></div>
+          <div style={{color:B.muted,fontSize:10,marginTop:4}}>{fmt(l.timestamp_inicio)} → {fmt(l.timestamp_fin)} · {l.operario}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* EXPORTAR */
+function Exportar(){
+  const [estado,setEstado]=useState("idle"); // idle | sync | error
+  const [ultimo,setUltimo]=useState(()=>LS.get("_lastsync",null));
+  const [,setTick]=useState(0);
+
+  // Trae lo más reciente de Supabase a la caché (todos los usuarios) y refresca la vista.
+  // Devuelve true si la nube respondió OK (o si no hay nube configurada → backup local).
+  const sincronizar=async()=>{
+    if(!SUPA_READY) return true;
+    setEstado("sync");
+    await obFlush();           // primero subir lo pendiente, después bajar
+    const ok=await pullAll();
+    setUltimo(LS.get("_lastsync",null));
+    setEstado(ok?"idle":"error");
+    setTick(t=>t+1);
+    return ok;
+  };
+  // Al entrar al módulo, bajar datos frescos para que los conteos y la exportación sean los reales.
+  useEffect(()=>{ sincronizar(); },[]);
+
+  const dl=(content,filename,type)=>{ const b=new Blob([content],{type}); const url=URL.createObjectURL(b); const a=document.createElement("a"); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url); };
+  // Garantiza datos frescos de la nube antes de generar cualquier archivo.
+  const exportar=async(fn)=>{ const ok=await sincronizar(); if(!ok&&!window.confirm("No se pudo traer lo último de la nube. ¿Exportar igual con los datos en caché?")) return; fn(); };
+
+  // Nota: los usuarios se exportan SIN contraseña (el backup circula por mail/WhatsApp)
+  const exportJSON=()=>{ const data={exportado:now(),empresa:"Chefexprés",entorno:ENV,version:"4.1",datos:{mp:LS.get("mp"),rellenos:LS.get("rellenos"),masas:LS.get("masas"),semi:LS.get("semi"),pt:LS.get("pt"),registros_limpieza:LS.get("registros_limpieza"),insumos_limpieza:LS.get("insumos_limpieza"),usuarios:LS.get("users").map(({pw,...u})=>u),catalogos:LS.get("catalogos")}}; dl(JSON.stringify(data,null,2),`chefexpres-backup-${now().slice(0,10)}.json`,"application/json"); };
+  // Escapa comillas y neutraliza inyección de fórmulas (=, +, -, @ al inicio ejecutan en Excel)
+  const q=v=>{ let s=(v??"").toString(); if(/^[=+\-@]/.test(s)) s="'"+s; return `"${s.replace(/"/g,'""')}"`; };
+  const CSVS=[
+    {label:"Ingreso MP",emoji:"📦",store:"mp",headers:["ID","Fecha ingreso","Proveedor","Material","Lote","Remito","Cant","Unidad","Vencimiento","Cargado por","Estado","Retrasada","Demora min"],row:i=>[i.id,i.timestamp?.slice(0,16),i.proveedor,i.material,i.lote,i.remito||"",i.cantidad,i.unidad,i.fecha_vto||"",i.operario,i.estado,i.retrasada?"Sí":"No",i.demora_min||0].map(q).join(";")},
+    {label:"Rellenos",emoji:"🥩",store:"rellenos",headers:["ID","Tipo","Lote","Inicio","Fin","Cant","Unidad","Vencimiento","Cargado por","Estado"],row:i=>[i.id,i.tipo,i.lote,i.timestamp_inicio?.slice(0,16),i.timestamp_fin?.slice(0,16)||"",i.cantidad,i.unidad,i.fecha_vto||"",i.operario,i.estado].map(q).join(";")},
+    {label:"Masas",emoji:"🥖",store:"masas",headers:["ID","Tipo","Lote","Inicio","Fin","Cant","Unidad","Vencimiento","Cargado por","Estado"],row:i=>[i.id,i.tipo,i.lote,i.timestamp_inicio?.slice(0,16),i.timestamp_fin?.slice(0,16)||"",i.cantidad,i.unidad,i.fecha_vto||"",i.operario,i.estado].map(q).join(";")},
+    {label:"Semielaborados",emoji:"🥟",store:"semi",headers:["ID","Tipo","Lote","Inicio","Fin","Cant","Unidad","Vencimiento","Cargado por","Estado"],row:i=>[i.id,i.tipo,i.lote,i.timestamp_inicio?.slice(0,16),i.timestamp_fin?.slice(0,16)||"",i.cantidad,i.unidad,i.fecha_vto||"",i.operario,i.estado].map(q).join(";")},
+    {label:"Producto Terminado",emoji:"✅",store:"pt",headers:["ID","Tipo","Lote PT","Inicio","Fin","Cant","Unidad","Vencimiento","Cargado por","Estado"],row:i=>[i.id,i.tipo,i.lote,i.timestamp_inicio?.slice(0,16),i.timestamp_fin?.slice(0,16)||"",i.cantidad,i.unidad,i.fecha_vto||"",i.operario,i.estado].map(q).join(";")},
+    {label:"Registro de limpiezas",emoji:"🧼",store:"registros_limpieza",headers:["ID","Fecha","Zona","POES","Ítems OK","Observaciones","Operario"],row:i=>[i.id,i.ts_registro?.slice(0,16),i.zona_nombre,i.poes||"",(i.items_ok||[]).join(" | "),i.observaciones||"",i.operario].map(q).join(";")},
+    {label:"Insumos de limpieza",emoji:"🧴",store:"insumos_limpieza",headers:["ID","Fecha","Insumo","Proveedor","Lote","Remito","Cant","Unidad","Vencimiento","Apto alim.","N° cert.","Operario"],row:i=>[i.id,i.ts_ingreso?.slice(0,16),i.insumo,i.proveedor,i.lote,i.remito||"",i.cantidad,i.unidad,i.fecha_vto||"",i.apto_alimenticio?"Sí":"No",i.nro_certificado||"",i.operario].map(q).join(";")},
+  ];
+  // BOM (\uFEFF) para que Excel reconozca UTF-8 (tildes/ñ) y separador ";" (locale es-AR)
+  const expCSV=c=>{ const rows=[c.headers.join(";"),...LS.get(c.store).map(c.row)]; dl("\uFEFF"+rows.join("\n"),`${c.store}-${now().slice(0,10)}.csv`,"text/csv;charset=utf-8"); };
+
+  const sincronizando=estado==="sync";
+  return (
+    <div>
+      <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:6}}>📤 Exportar datos</div>
+      <div style={{color:B.muted,fontSize:12,marginBottom:14}}>{SUPA_READY?"Trae lo más reciente de la nube (todos los usuarios) y lo exporta. Ideal para respaldo y auditoría.":"⚠️ Sin conexión a la nube: exporta solo los datos de este dispositivo."}</div>
+      {SUPA_READY&&(
+        <div style={{...css.card,padding:"10px 13px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center",borderColor:estado==="error"?`${B.red}50`:B.border}}>
+          <div style={{fontSize:12}}>
+            {sincronizando&&<span style={{color:B.accent}}>🔄 Sincronizando con la nube…</span>}
+            {!sincronizando&&estado==="error"&&<span style={{color:B.red}}>⚠️ No se pudo sincronizar. Reintentá.</span>}
+            {!sincronizando&&estado!=="error"&&<span style={{color:B.muted}}>☁️ Datos al día{ultimo?` · ${fmt(ultimo)}`:""}</span>}
+          </div>
+          <button disabled={sincronizando} style={{...css.btnSm,color:B.accent,borderColor:B.accent+"40",opacity:sincronizando?0.5:1}} onClick={sincronizar}>Actualizar ↻</button>
+        </div>
+      )}
+      <div style={{...css.card,padding:20,marginBottom:16,borderColor:`${B.accent}40`}}>
+        <div style={{fontSize:24,marginBottom:8}}>🗂️</div>
+        <div style={{color:B.text,fontWeight:800,fontSize:16}}>Backup completo JSON</div>
+        <div style={{color:B.muted,fontSize:13,marginTop:4}}>Todos los módulos + catálogos en un archivo. Hacelo antes de cada actualización.</div>
+        <button disabled={sincronizando} style={{...css.btn,marginTop:14,opacity:sincronizando?0.6:1}} onClick={()=>exportar(exportJSON)}>{sincronizando?"Trayendo de la nube…":"Descargar backup"}</button>
+      </div>
+      <div style={{color:B.text,fontWeight:700,marginBottom:12}}>Exportar por módulo (CSV para Excel)</div>
+      {CSVS.map(c=>(
+        <div key={c.store} style={{...css.card,padding:"13px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><span style={{fontSize:18,marginRight:8}}>{c.emoji}</span><span style={{color:B.text,fontWeight:700}}>{c.label}</span><span style={{color:B.muted,fontSize:11,marginLeft:8}}>{LS.get(c.store).length} reg.</span></div>
+          <button disabled={sincronizando} style={{...css.btnSm,color:B.accent,borderColor:B.accent+"40",opacity:sincronizando?0.5:1}} onClick={()=>exportar(()=>expCSV(c))}>CSV ↓</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* CAPACITACIÓN */
+/* Flag: la IA queda apagada en el MVP (feature opcional con costo). Cambiar a true para activarla. */
+const IA_ENABLED = false;
+
+function Capacitacion({user}){
+  const [mode,setMode]=useState("menu");
+  const [quiz,setQuiz]=useState([]); // preguntas del intento actual (aleatorias)
+  const [qi,setQi]=useState(0),[selQ,setSelQ]=useState(null),[ans,setAns]=useState([]);
+  const [saved,setSaved]=useState(false);
+  const [msgs,setMsgs]=useState([{role:"assistant",text:"Hola 👋 Soy tu asistente de inocuidad alimentaria. ¿Qué necesitás?"}]);
+  const [input,setInput]=useState(""),[loading,setLoading]=useState(false);
+  const ref=useRef(null);
+  useEffect(()=>{ref.current?.scrollIntoView({behavior:"smooth"});},[msgs]);
+
+  const startQuiz=()=>{ setQuiz(pickQuiz()); setQi(0); setAns([]); setSelQ(null); setSaved(false); setMode("quiz"); };
+  const sig=()=>{ if(selQ===null)return; const na=[...ans,{qi,sel:selQ,ok:selQ===quiz[qi].ok}]; if(qi<quiz.length-1){setAns(na);setQi(qi+1);setSelQ(null);}else{setAns(na);setMode("result");} };
+
+  // Guardar puntaje en el ranking (mejor intento por usuario)
+  const guardarPuntaje=(pct,score,total)=>{
+    const rk=LS.get("ranking");
+    const idx=rk.findIndex(r=>r.userId===user.id);
+    const entry={userId:user.id,nombre:user.nombre,mejorPct:pct,intentos:1,ultima:now()};
+    if(idx>=0){
+      const prev=rk[idx];
+      rk[idx]={...prev,mejorPct:Math.max(prev.mejorPct,pct),intentos:(prev.intentos||0)+1,ultima:now(),nombre:user.nombre};
+    } else rk.push(entry);
+    LS.set("ranking",rk);
+    const mine=rk.find(r=>r.userId===user.id);
+    if(mine) pushRanking(mine);
+    setSaved(true);
+  };
+
+  const sendAI=async()=>{ if(!input.trim()||loading)return; const q=input.trim();setInput("");setMsgs(p=>[...p,{role:"user",text:q}]);setLoading(true);
+    try{ const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,system:"Sos especialista en inocuidad alimentaria y BPM para la industria argentina. Español rioplatense, claro y práctico. Conocés CAA, ANMAT, SENASA, HACCP. Empresa: Chefexprés, Godoy Cruz, Mendoza.",messages:msgs.slice(1).concat({role:"user",content:q}).map(m=>({role:m.role,content:m.text||m.content}))})}); const d=await r.json(); setMsgs(p=>[...p,{role:"assistant",text:d.content?.[0]?.text||"Sin respuesta."}]); }catch{setMsgs(p=>[...p,{role:"assistant",text:"Error de conexión."}]);} setLoading(false); };
+
+  if(mode==="menu") return (
+    <div>
+      <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:6}}>🎓 Capacitación</div>
+      <div style={{color:B.muted,fontSize:12,marginBottom:24}}>Formación en inocuidad alimentaria y trazabilidad</div>
+      <div style={{...css.card,padding:20,marginBottom:12,cursor:"pointer",borderColor:`${B.accent}50`}} onClick={startQuiz}><div style={{fontSize:28,marginBottom:8}}>📝</div><div style={{color:B.text,fontWeight:800,fontSize:16}}>Quiz BPM / HACCP</div><div style={{color:B.muted,fontSize:13,marginTop:4}}>{QUIZ_N} preguntas al azar de un banco de {QUIZ.length} · inocuidad, CAA, trazabilidad</div></div>
+      <div style={{...css.card,padding:20,marginBottom:12,cursor:"pointer",borderColor:`${B.yellow}40`}} onClick={()=>setMode("ranking")}><div style={{fontSize:28,marginBottom:8}}>🏆</div><div style={{color:B.text,fontWeight:800,fontSize:16}}>Ranking del equipo</div><div style={{color:B.muted,fontSize:13,marginTop:4}}>Tabla de posiciones · mejor puntaje de cada uno</div></div>
+      {IA_ENABLED&&<div style={{...css.card,padding:20,cursor:"pointer",borderColor:`${B.purple}40`}} onClick={()=>setMode("ai")}><div style={{fontSize:28,marginBottom:8}}>🤖</div><div style={{color:B.text,fontWeight:800,fontSize:16}}>Asistente de Inocuidad IA</div><div style={{color:B.muted,fontSize:13,marginTop:4}}>Consultá normativas, dudas de proceso, CAA</div></div>}
+    </div>
+  );
+
+  if(mode==="quiz"){ const q=quiz[qi]; if(!q) return null; return (
+    <div>
+      <button style={css.back} onClick={()=>setMode("menu")}>← Salir</button>
+      <div style={{color:B.muted,fontSize:12,marginBottom:4}}>Pregunta {qi+1}/{quiz.length}</div>
+      <div style={{background:B.border,borderRadius:4,height:4,marginBottom:20}}><div style={{background:B.accent,height:4,borderRadius:4,width:`${((qi+1)/quiz.length)*100}%`}}/></div>
+      <div style={{color:B.text,fontSize:15,fontWeight:700,marginBottom:20,lineHeight:1.5}}>{q.q}</div>
+      {q.opts.map((opt,i)=>(<div key={i} onClick={()=>selQ===null&&setSelQ(i)} style={{...css.card,padding:"13px 14px",marginBottom:10,cursor:selQ===null?"pointer":"default",borderColor:selQ!==null?(i===q.ok?B.green:i===selQ?B.red:B.border):B.border,background:selQ!==null?(i===q.ok?"#1B3A1C":i===selQ?"#3D0E0E":B.card):B.card}}><div style={{color:selQ!==null?(i===q.ok?B.green:i===selQ?B.red:B.muted):B.text,fontSize:14}}>{selQ!==null&&i===q.ok&&"✓ "}{selQ!==null&&i===selQ&&i!==q.ok&&"✗ "}{opt}</div></div>))}
+      {selQ!==null&&<><div style={{...css.card,padding:"12px 14px",marginBottom:16,borderColor:`${B.green}50`,background:"#1B3A1C"}}><div style={{color:B.green,fontSize:12,fontWeight:700,marginBottom:4}}>Explicación</div><div style={{color:B.text,fontSize:13,lineHeight:1.5}}>{q.exp}</div></div><button style={css.btn} onClick={sig}>{qi<quiz.length-1?"Siguiente →":"Ver resultados"}</button></>}
+    </div>
+  ); }
+
+  if(mode==="result"){ const score=ans.filter(a=>a.ok).length,total=quiz.length,pct=Math.round(score/total*100); return (
+    <div>
+      <div style={{textAlign:"center",padding:"20px 0"}}><div style={{fontSize:56,marginBottom:8}}>{pct>=80?"🏆":pct>=60?"⭐":"📚"}</div><div style={{color:B.text,fontSize:24,fontWeight:800}}>{score}/{total}</div><div style={{color:B.accent,fontSize:36,fontWeight:800,marginTop:4}}>{pct}%</div><div style={{color:B.text,fontSize:15,marginTop:8}}>{pct>=80?"✅ Excelente":pct>=60?"👍 Bueno":pct>=40?"⚠️ Regular":"🔴 Necesita refuerzo"}</div><div style={{color:B.muted,fontSize:12,marginTop:4}}>{user.nombre}</div></div>
+      {!saved
+        ? <button style={{...css.btn,marginBottom:12}} onClick={()=>guardarPuntaje(pct,score,total)}>🏆 Guardar puntaje en el ranking</button>
+        : <div style={{...css.card,padding:"12px 14px",marginBottom:12,borderColor:`${B.accent}50`,textAlign:"center",color:B.accent,fontWeight:700,fontSize:13}}>✓ Puntaje guardado. <span style={{color:B.muted,fontWeight:400}}>Se conserva tu mejor resultado.</span></div>}
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        <button style={{...css.btn,flex:1,background:B.card,color:B.text,border:`1px solid ${B.border}`}} onClick={()=>setMode("ranking")}>Ver ranking</button>
+        <button style={{...css.btn,flex:1}} onClick={startQuiz}>Reintentar</button>
+      </div>
+      {ans.map((a,i)=>(<div key={i} style={{...css.card,padding:"10px 13px",marginBottom:8,borderColor:a.ok?`${B.accent}40`:`${B.red}40`}}><div style={{color:a.ok?B.accent:B.red,fontSize:12,fontWeight:700,marginBottom:3}}>{a.ok?"✓":"✗"} Pregunta {i+1}</div><div style={{color:B.muted,fontSize:12}}>{quiz[a.qi].q.slice(0,65)}…</div>{!a.ok&&<div style={{color:B.text,fontSize:12,marginTop:4}}>Correcta: <b>{quiz[a.qi].opts[quiz[a.qi].ok]}</b></div>}</div>))}
+      <button style={{...css.btn,marginTop:4,background:B.card,color:B.text,border:`1px solid ${B.border}`}} onClick={()=>setMode("menu")}>Volver al menú</button>
+    </div>
+  ); }
+
+  if(mode==="ranking"){ const rk=[...LS.get("ranking")].sort((a,b)=>b.mejorPct-a.mejorPct); const medal=i=>i===0?"🥇":i===1?"🥈":i===2?"🥉":`${i+1}°`; return (
+    <div>
+      <button style={css.back} onClick={()=>setMode("menu")}>← Volver</button>
+      <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:6}}>🏆 Ranking del equipo</div>
+      <div style={{color:B.muted,fontSize:12,marginBottom:20}}>Mejor puntaje de cada persona en el quiz BPM/HACCP</div>
+      {rk.length===0&&<div style={{color:B.muted,textAlign:"center",padding:40}}>Todavía nadie completó el quiz.<br/>¡Sé el primero en el ranking!</div>}
+      {rk.map((r,i)=>(
+        <div key={r.userId} style={{...css.card,padding:"13px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:14,borderColor:r.userId===user.id?`${B.accent}60`:i<3?`${B.yellow}40`:B.border}}>
+          <div style={{fontSize:i<3?22:16,fontWeight:800,color:i<3?B.yellow:B.muted,width:32,textAlign:"center"}}>{medal(i)}</div>
+          <div style={{flex:1}}><div style={{color:B.text,fontWeight:700,fontSize:14}}>{r.nombre}{r.userId===user.id&&<span style={{color:B.muted,fontSize:11}}> (vos)</span>}</div><div style={{color:B.muted,fontSize:11,marginTop:2}}>{r.intentos} intento{r.intentos>1?"s":""} · últ. {fmt(r.ultima)}</div></div>
+          <div style={{textAlign:"right"}}><div style={{color:r.mejorPct>=80?B.accent:r.mejorPct>=60?B.yellow:B.muted,fontSize:22,fontWeight:800}}>{r.mejorPct}%</div></div>
+        </div>
+      ))}
+    </div>
+  ); }
+
+  // mode==="ai" (solo si IA_ENABLED)
+  return (
+    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 140px)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}><button style={{...css.back,marginBottom:0}} onClick={()=>setMode("menu")}>←</button><div><div style={{color:B.text,fontWeight:800,fontSize:15}}>Asistente Inocuidad</div><div style={{color:B.muted,fontSize:11}}>CAA · BPM · HACCP · ANMAT</div></div><div style={{marginLeft:"auto",width:7,height:7,borderRadius:"50%",background:B.accent}}/></div>
+      <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column",gap:10,marginBottom:10}}>
+        {msgs.map((m,i)=>(<div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}><div style={{maxWidth:"82%",borderRadius:12,padding:"10px 14px",fontSize:13,lineHeight:1.5,background:m.role==="user"?B.accent:B.card,color:m.role==="user"?"#0A1A0C":B.text,border:m.role==="user"?"none":`1px solid ${B.border}`}}>{m.text}</div></div>))}
+        {loading&&<div style={{display:"flex"}}><div style={{...css.card,padding:"10px 14px",color:B.muted,fontSize:13}}>Consultando…</div></div>}
+        <div ref={ref}/>
+      </div>
+      <div style={{display:"flex",gap:8}}><input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendAI()} placeholder="Consultá sobre inocuidad, BPM…" style={{flex:1,...css.input}}/><button onClick={sendAI} disabled={loading} style={{...css.btn,width:"auto",padding:"0 18px",fontSize:18,opacity:loading?0.5:1}}>→</button></div>
+    </div>
+  );
+}
+
+/* DASHBOARD */
+function Dashboard({user,setScreen}){
+  const mp=LS.get("mp"), pt=LS.get("pt");
+  const enProceso=ALL_STORES.flatMap(s=>LS.get(s)).filter(i=>i.estado==="en_proceso").length;
+  const cuarentena=pt.filter(l=>l.estado==="cuarentena");
+  const pend=countPendientes();
+  const NAV=[
+    {id:"mp",icon:"📦",label:"Ingreso MP",sub:"Recepción de materias primas",show:can(user,"mp")},
+    {id:"rellenos",icon:"🥩",label:"Rellenos",sub:"Elaboración de rellenos",show:can(user,"rellenos")},
+    {id:"masas",icon:"🥖",label:"Masas",sub:"Elaboración de masa",show:can(user,"masas")},
+    {id:"semi",icon:"🥟",label:"Semielaborados",sub:"Armado con masa y relleno",show:can(user,"semi")},
+    {id:"pt",icon:"✅",label:"Prod. Terminado",sub:"Empaque final y liberación",show:can(user,"pt")},
+    {id:"limpieza",icon:"🧼",label:"Limpiezas",sub:"Registro de higiene por zona",show:can(user,"limpieza")},
+    {id:"insumoslimp",icon:"🧴",label:"Insumos de limpieza",sub:"Ingreso de productos de limpieza",show:can(user,"insumoslimp")},
+    {id:"anulaciones",icon:"✋",label:"Anulaciones",sub:pend>0?`${pend} pendiente(s)`:"Sin pendientes",show:can(user,"aprobar"),badge:pend},
+    {id:"traze",icon:"🔗",label:"Trazabilidad",sub:"Cadena completa MP → PT",show:can(user,"traze")},
+    {id:"efic",icon:"📊",label:"Eficiencia",sub:"Tiempos y métricas",show:can(user,"efic")},
+    {id:"exportar",icon:"📤",label:"Exportar datos",sub:"Backup JSON y CSV",show:can(user,"exportar")},
+    {id:"cap",icon:"🎓",label:"Capacitación",sub:"Quiz BPM/HACCP y ranking",show:true},
+    {id:"config",icon:"⚙️",label:"Configuración",sub:"Catálogos predeterminados",show:user.esAdmin},
+    {id:"zonas",icon:"🧼",label:"Zonas de limpieza",sub:"Configurar zonas y chequeos",show:user.esAdmin},
+    {id:"usuarios",icon:"👥",label:"Usuarios",sub:"Gestión de accesos y permisos",show:user.esAdmin},
+  ].filter(n=>n.show);
+  return (
+    <div>
+      <div style={{marginBottom:20}}><div style={{color:B.muted,fontSize:13}}>Hola,</div><div style={{color:B.text,fontSize:22,fontWeight:800}}>{user.nombre}</div><div style={{marginTop:4}}>{user.esAdmin?<Badge color={B.yellow} bg="#3D2C00" label="Administrador"/>:<Badge color={B.accent} bg={B.accentD} label="Usuario operativo"/>}</div></div>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
+        {[["MP recibidas",mp.filter(i=>i.estado!=="rechazado"&&i.estado!=="anulado").length,B.text],["En elaboración",enProceso,B.yellow],["PT liberados",pt.filter(l=>l.estado==="liberado").length,B.accent],["Cuarentena",cuarentena.length,cuarentena.length?B.red:B.muted]].map(([l,v,c])=>(<div key={l} style={{...css.card,flex:1,minWidth:100,padding:"12px 14px"}}><div style={{color:B.muted,fontSize:10,textTransform:"uppercase",letterSpacing:1,marginBottom:5}}>{l}</div><div style={{color:c,fontSize:22,fontWeight:800}}>{v}</div></div>))}
+      </div>
+      {pend>0&&can(user,"aprobar")&&<div onClick={()=>setScreen("anulaciones")} style={{background:"#3D2C00",border:`1px solid ${B.yellow}50`,borderRadius:10,padding:"12px 16px",marginBottom:12,cursor:"pointer",display:"flex",gap:10,alignItems:"center"}}><span style={{fontSize:20}}>✋</span><div><div style={{color:B.yellow,fontWeight:700,fontSize:13}}>{pend} anulación(es) pendiente(s)</div><div style={{color:B.muted,fontSize:12}}>Tocá para revisar</div></div></div>}
+      {cuarentena.length>0&&can(user,"pt")&&<div onClick={()=>setScreen("pt")} style={{background:"#3D0E0E",border:`1px solid ${B.red}50`,borderRadius:10,padding:"12px 16px",marginBottom:16,cursor:"pointer",display:"flex",gap:10,alignItems:"center"}}><span style={{fontSize:20}}>⚠️</span><div><div style={{color:B.red,fontWeight:700,fontSize:13}}>{cuarentena.length} lote(s) en cuarentena</div><div style={{color:"#FC9E9E",fontSize:12}}>Tocá para gestionar en Producto Terminado</div></div></div>}
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {NAV.map(n=>(<div key={n.id} onClick={()=>setScreen(n.id)} style={{...css.card,padding:"14px 16px",cursor:"pointer",display:"flex",alignItems:"center",gap:14}}><span style={{fontSize:22}}>{n.icon}</span><div style={{flex:1}}><div style={{color:B.text,fontWeight:700,fontSize:14}}>{n.label}</div><div style={{color:B.muted,fontSize:12,marginTop:1}}>{n.sub}</div></div>{n.badge>0&&<span style={{background:B.yellow,color:"#0A1A0C",borderRadius:10,padding:"1px 8px",fontSize:12,fontWeight:800}}>{n.badge}</span>}<span style={{color:B.subtle,fontSize:20}}>›</span></div>))}
+      </div>
+    </div>
+  );
+}
+
+/* REGISTRO DE LIMPIEZAS (operario) */
+function Limpiezas({user}){
+  const [zonas]=useState(()=>LS.get("zonas_limpieza").filter(z=>z.activo!==false));
+  const [regs,setRegs]=useState(()=>LS.get("registros_limpieza"));
+  const [view,setView]=useState("list");
+  const [zonaId,setZonaId]=useState("");
+  const [okItems,setOkItems]=useState({});
+  const [obs,setObs]=useState("");
+  const [sel,setSel]=useState(null);
+  const [q,setQ]=useState("");
+  const zona=zonas.find(z=>z.id===zonaId);
+
+  const startNew=()=>{ setZonaId(zonas[0]?.id||""); setOkItems({}); setObs(""); setView("form"); };
+  const togItem=it=>setOkItems(p=>({...p,[it]:!p[it]}));
+  const save=()=>{
+    if(!zona) return alert("Elegí una zona");
+    const items_ok=zona.items.filter(it=>okItems[it]);
+    const reg={ id:uid(), zona_id:zona.id, zona_nombre:zona.nombre, poes:zona.poes,
+      items_ok, observaciones:obs, operario:user.nombre, ts_registro:now() };
+    const upd=[reg,...regs]; LS.set("registros_limpieza",upd); setRegs(upd); pushLimpieza(reg); setView("list");
+  };
+
+  if(view==="form") return (
+    <div>
+      <button style={css.back} onClick={()=>setView("list")}>← Volver</button>
+      <div style={{color:B.text,fontSize:16,fontWeight:800,marginBottom:14}}>🧼 Registrar limpieza</div>
+      {zonas.length===0
+        ? <div style={{color:B.muted,fontSize:13}}>No hay zonas configuradas. Pedí al administrador que las cargue en Configuración.</div>
+        : <>
+          <Field label="Zona a limpiar *">
+            <select style={css.input} value={zonaId} onChange={e=>{setZonaId(e.target.value);setOkItems({});}}>
+              {zonas.map(z=><option key={z.id} value={z.id}>{z.nombre}</option>)}
+            </select>
+          </Field>
+          {zona&&zona.poes&&<div style={{...css.card,padding:"10px 13px",marginBottom:14,borderColor:`${B.yellow}40`,background:"#3D2C0022"}}><div style={{color:B.yellow,fontSize:12,fontWeight:700}}>📋 Procedimiento de referencia: {zona.poes}</div><div style={{color:B.muted,fontSize:11,marginTop:2}}>Seguí el POES correspondiente (disponible en Capacitación).</div></div>}
+          {zona&&(
+            <>
+              <div style={css.sec}>Ítems de chequeo</div>
+              {zona.items.length===0&&<div style={{color:B.muted,fontSize:13,marginBottom:10}}>Esta zona no tiene ítems configurados.</div>}
+              {zona.items.map(it=><PermCheck key={it} label={it} checked={!!okItems[it]} onToggle={()=>togItem(it)}/>)}
+            </>
+          )}
+          <Field label="Observaciones" mb={18}><textarea style={{...css.input,resize:"vertical"}} rows={3} value={obs} onChange={e=>setObs(e.target.value)} placeholder="Anotá cualquier hallazgo o detalle..."/></Field>
+          <button style={css.btn} onClick={save}>Guardar registro</button>
+        </>
+      }
+    </div>
+  );
+
+  if(view==="detail"&&sel) return (
+    <div>
+      <button style={css.back} onClick={()=>{setSel(null);setView("list");}}>← Volver</button>
+      <div style={{color:B.text,fontSize:16,fontWeight:800,marginBottom:2}}>{sel.zona_nombre}</div>
+      <div style={{color:B.muted,fontSize:12,marginBottom:16}}>{sel.poes||"—"} · {fmt(sel.ts_registro)}</div>
+      <div style={css.sec}>Ítems realizados</div>
+      {(sel.items_ok||[]).map(it=><div key={it} style={{...css.card,padding:"9px 12px",marginBottom:6}}><span style={{color:B.accent,fontWeight:800}}>✓</span> <span style={{color:B.text,fontSize:13}}>{it}</span></div>)}
+      {(!sel.items_ok||sel.items_ok.length===0)&&<div style={{color:B.muted,fontSize:13}}>No se tildaron ítems.</div>}
+      {sel.observaciones&&<><div style={{...css.sec,marginTop:14}}>Observaciones</div><div style={{...css.card,padding:"10px 13px",color:B.text,fontSize:13}}>{sel.observaciones}</div></>}
+      <div style={{color:B.subtle,fontSize:12,marginTop:14}}>👤 Registrado por {sel.operario}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div><div style={{color:B.text,fontSize:16,fontWeight:800}}>🧼 Registro de limpiezas</div><div style={{color:B.muted,fontSize:12}}>Historial de limpiezas realizadas</div></div>
+        <button style={{...css.btn,width:"auto",padding:"9px 14px",fontSize:13}} onClick={startNew}>+ Nueva</button>
+      </div>
+      {regs.length===0&&<div style={{color:B.muted,textAlign:"center",padding:40}}>Sin registros de limpieza aún.</div>}
+      {regs.length>4&&<input value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Buscar por zona, POES, fecha u operario..." style={{...css.input,marginBottom:12}}/>}
+      {regs.filter(r=>{ const t=q.toLowerCase().trim(); return !t||(`${r.zona_nombre} ${r.poes||""} ${r.operario} ${fechaBuscable(r.ts_registro)}`).toLowerCase().includes(t); }).map(r=>(
+        <div key={r.id} onClick={()=>{setSel(r);setView("detail");}} style={{...css.card,padding:"13px 14px",marginBottom:10,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><div style={{color:B.text,fontWeight:700,fontSize:14}}>{r.zona_nombre}</div><div style={{color:B.muted,fontSize:11,marginTop:2}}>{r.poes||"—"} · {(r.items_ok||[]).length} ítem(s) · {fmt(r.ts_registro)}</div><div style={{color:B.subtle,fontSize:11,marginTop:1}}>👤 {r.operario}</div></div>
+          <div style={{color:B.subtle}}>›</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* CONFIGURACIÓN DE ZONAS DE LIMPIEZA (admin) */
+function ConfigZonas(){
+  const [zonas,setZonas]=useState(()=>LS.get("zonas_limpieza"));
+  const [view,setView]=useState("list");
+  const [form,setForm]=useState({id:null,nombre:"",poes:"",items:[]});
+  const [itemTxt,setItemTxt]=useState("");
+
+  const persist=upd=>{ LS.set("zonas_limpieza",upd); setZonas(upd); };
+  const nueva=()=>{ setForm({id:null,nombre:"",poes:"",items:[]}); setItemTxt(""); setView("form"); };
+  const editar=z=>{ setForm({id:z.id,nombre:z.nombre,poes:z.poes||"",items:[...(z.items||[])]}); setItemTxt(""); setView("form"); };
+  const addItem=()=>{ if(!itemTxt.trim())return; setForm(p=>({...p,items:[...p.items,itemTxt.trim()]})); setItemTxt(""); };
+  const delItem=i=>setForm(p=>({...p,items:p.items.filter((_,idx)=>idx!==i)}));
+  const save=()=>{
+    if(!form.nombre.trim()) return alert("Poné un nombre de zona");
+    let z;
+    let upd;
+    if(form.id){ z={id:form.id,nombre:form.nombre.trim(),poes:form.poes.trim(),items:form.items,activo:true}; upd=zonas.map(x=>x.id===form.id?z:x); }
+    else { z={id:uid(),nombre:form.nombre.trim(),poes:form.poes.trim(),items:form.items,activo:true}; upd=[...zonas,z]; }
+    persist(upd); pushZona(z); setView("list");
+  };
+  const borrar=z=>{ if(!window.confirm(`¿Eliminar la zona "${z.nombre}"? Los registros ya hechos se conservan.`))return; persist(zonas.filter(x=>x.id!==z.id)); delZona(z.id); };
+
+  if(view==="form") return (
+    <div>
+      <button style={css.back} onClick={()=>setView("list")}>← Volver</button>
+      <div style={{color:B.text,fontSize:16,fontWeight:800,marginBottom:14}}>{form.id?"Editar":"Nueva"} zona de limpieza</div>
+      <Field label="Nombre de la zona *"><input style={css.input} value={form.nombre} onChange={e=>setForm(p=>({...p,nombre:e.target.value}))} placeholder="Ej. Cámara de frío"/></Field>
+      <Field label="POES asociado"><input style={css.input} value={form.poes} onChange={e=>setForm(p=>({...p,poes:e.target.value}))} placeholder="Ej. POES-05"/></Field>
+      <div style={css.sec}>Ítems de chequeo</div>
+      <div style={{display:"flex",gap:8,marginBottom:10}}>
+        <input style={{...css.input,flex:1}} value={itemTxt} onChange={e=>setItemTxt(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addItem()} placeholder="Escribí un ítem y Enter"/>
+        <button style={{...css.btn,width:"auto",padding:"0 16px"}} onClick={addItem}>+</button>
+      </div>
+      {form.items.length===0&&<div style={{color:B.muted,fontSize:12,marginBottom:10}}>Agregá los ítems que el operario deberá tildar al limpiar esta zona.</div>}
+      {form.items.map((it,i)=>(
+        <div key={i} style={{...css.card,padding:"9px 12px",marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{color:B.text,fontSize:13}}>{it}</span>
+          <button onClick={()=>delItem(i)} style={{background:"none",border:"none",color:B.red,cursor:"pointer",fontSize:16}}>×</button>
+        </div>
+      ))}
+      <button style={{...css.btn,marginTop:14}} onClick={save}>Guardar zona</button>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div><div style={{color:B.text,fontSize:16,fontWeight:800}}>🧼 Zonas de limpieza</div><div style={{color:B.muted,fontSize:12}}>Configurá zonas, POES e ítems de chequeo</div></div>
+        <button style={{...css.btn,width:"auto",padding:"9px 14px",fontSize:13}} onClick={nueva}>+ Nueva</button>
+      </div>
+      {zonas.length===0&&<div style={{color:B.muted,textAlign:"center",padding:40}}>Sin zonas configuradas.</div>}
+      {zonas.map(z=>(
+        <div key={z.id} style={{...css.card,padding:"13px 14px",marginBottom:10}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div style={{flex:1}}>
+              <div style={{color:B.text,fontWeight:700,fontSize:14}}>{z.nombre}</div>
+              <div style={{color:B.muted,fontSize:11,marginTop:2}}>{z.poes||"sin POES"} · {(z.items||[]).length} ítem(s)</div>
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={()=>editar(z)} style={{...css.btnSm,padding:"5px 10px"}}>Editar</button>
+              <button onClick={()=>borrar(z)} style={{...css.btnSm,padding:"5px 10px",color:B.red,borderColor:`${B.red}40`}}>Borrar</button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* INGRESO DE INSUMOS DE LIMPIEZA */
+function InsumosLimpieza({user}){
+  const cat=getCat();
+  const insumosCat=cat.insumos_limpieza||[];
+  const F0={insumo:insumosCat[0]||"",proveedor:cat.mp_proveedores[0]||"",lote:"",remito:"",cantidad:"",unidad:cat.mp_unidades[0]||"unid",fecha_vto:"",apto:false,nro_cert:"",obs:""};
+  const [list,setList]=useState(()=>LS.get("insumos_limpieza"));
+  const [form,setForm]=useState(F0);
+  const [view,setView]=useState("list");
+  const [sel,setSel]=useState(null);
+  const [q,setQ]=useState("");
+  const u=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+
+  const save=()=>{
+    if(!form.insumo||!form.proveedor||!form.lote) return alert("Completá insumo, proveedor y lote");
+    if(form.apto&&!form.nro_cert.trim()) return alert("Indicá el número de certificado apto alimenticio");
+    const item={ id:uid(), insumo:form.insumo, proveedor:form.proveedor, lote:form.lote, remito:form.remito||null,
+      cantidad:form.cantidad?parseFloat(form.cantidad):null, unidad:form.unidad, fecha_vto:form.fecha_vto||null,
+      apto_alimenticio:form.apto, nro_certificado:form.apto?form.nro_cert.trim():null, obs:form.obs,
+      operario:user.nombre, estado:"disponible", ts_ingreso:now() };
+    const upd=[item,...list]; LS.set("insumos_limpieza",upd); setList(upd); pushInsumo(item); setForm({...F0}); setView("list");
+  };
+
+  if(view==="form") return (
+    <div>
+      <button style={css.back} onClick={()=>setView("list")}>← Volver</button>
+      <div style={{color:B.text,fontSize:16,fontWeight:800,marginBottom:14}}>🧴 Ingreso de insumo de limpieza</div>
+      {insumosCat.length===0
+        ? <div style={{color:B.muted,fontSize:13}}>No hay insumos configurados. Pedí al administrador que los cargue en Configuración.</div>
+        : <>
+          <Field label="Insumo *"><select style={css.input} value={form.insumo} onChange={u("insumo")}>{insumosCat.map(x=><option key={x}>{x}</option>)}</select></Field>
+          <Field label="Proveedor *"><select style={css.input} value={form.proveedor} onChange={u("proveedor")}>{cat.mp_proveedores.map(p=><option key={p}>{p}</option>)}</select></Field>
+          <div style={{display:"flex",gap:10}}>
+            <div style={{flex:2}}><Field label="Lote *"><input style={css.input} value={form.lote} onChange={u("lote")} placeholder="Lote del proveedor"/></Field></div>
+            <div style={{flex:1}}><Field label="Cant."><input style={css.input} type="number" value={form.cantidad} onChange={u("cantidad")}/></Field></div>
+            <div style={{flex:1}}><Field label="Unidad"><select style={css.input} value={form.unidad} onChange={u("unidad")}>{cat.mp_unidades.map(x=><option key={x}>{x}</option>)}</select></Field></div>
+          </div>
+          <Field label="Remito (opcional)"><input style={css.input} value={form.remito} onChange={u("remito")} placeholder="N° de remito"/></Field>
+          <Field label="Fecha de vencimiento"><input style={css.input} type="date" value={form.fecha_vto} onChange={u("fecha_vto")}/></Field>
+          <PermCheck label="🏅 Trae certificado apto alimenticio" checked={form.apto} onToggle={()=>setForm(p=>({...p,apto:!p.apto}))}/>
+          {form.apto&&<Field label="N° de certificado apto alimenticio *"><input style={css.input} value={form.nro_cert} onChange={u("nro_cert")} placeholder="N° de certificado"/></Field>}
+          <Field label="Observaciones" mb={18}><textarea style={{...css.input,resize:"vertical"}} rows={2} value={form.obs} onChange={u("obs")} placeholder="Detalles del ingreso..."/></Field>
+          <button style={css.btn} onClick={save}>Guardar ingreso</button>
+        </>
+      }
+    </div>
+  );
+
+  if(view==="detail"&&sel) return (
+    <div>
+      <button style={css.back} onClick={()=>{setSel(null);setView("list");}}>← Volver</button>
+      <div style={{color:B.text,fontSize:16,fontWeight:800,marginBottom:2}}>{sel.insumo}</div>
+      <div style={{color:B.muted,fontSize:12,marginBottom:16}}>{fmt(sel.ts_ingreso)}</div>
+      {[["Proveedor",sel.proveedor],["Lote",sel.lote],sel.remito&&["Remito",sel.remito],sel.cantidad!=null&&["Cantidad",`${sel.cantidad} ${sel.unidad}`],sel.fecha_vto&&["Vencimiento",sel.fecha_vto],["Apto alimenticio",sel.apto_alimenticio?`Sí — Cert. ${sel.nro_certificado||"—"}`:"No"],["Cargado por",sel.operario]].filter(Boolean).map(([l,v])=>(
+        <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"9px 0",borderBottom:`1px solid ${B.border}`}}><span style={{color:B.muted,fontSize:13}}>{l}</span><span style={{color:B.text,fontSize:13,fontWeight:600,textAlign:"right"}}>{v}</span></div>
+      ))}
+      {sel.obs&&<><div style={{...css.sec,marginTop:14}}>Observaciones</div><div style={{...css.card,padding:"10px 13px",color:B.text,fontSize:13}}>{sel.obs}</div></>}
+    </div>
+  );
+
+  const filt=list.filter(i=>{ const t=q.toLowerCase().trim(); return !t||(`${i.insumo} ${i.proveedor} ${i.lote} ${i.operario||""} ${fechaBuscable(i.ts_ingreso)}`).toLowerCase().includes(t); });
+  return (
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div><div style={{color:B.text,fontSize:16,fontWeight:800}}>🧴 Insumos de limpieza</div><div style={{color:B.muted,fontSize:12}}>Ingresos de productos de limpieza</div></div>
+        <button style={{...css.btn,width:"auto",padding:"9px 14px",fontSize:13}} onClick={()=>{setForm({...F0});setView("form");}}>+ Nuevo</button>
+      </div>
+      {list.length===0&&<div style={{color:B.muted,textAlign:"center",padding:40}}>Sin ingresos de insumos aún.</div>}
+      {list.length>4&&<input value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Buscar por insumo, proveedor, lote, fecha u operario..." style={{...css.input,marginBottom:12}}/>}
+      {filt.map(i=>(
+        <div key={i.id} onClick={()=>{setSel(i);setView("detail");}} style={{...css.card,padding:"13px 14px",marginBottom:10,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><div style={{color:B.text,fontWeight:700,fontSize:14}}>{i.insumo}{i.apto_alimenticio&&<span style={{color:B.accent,fontSize:11}}> 🏅 apto</span>}</div><div style={{color:B.muted,fontSize:11,marginTop:2}}>{i.proveedor} · Lote {i.lote}{i.cantidad!=null?` · ${i.cantidad} ${i.unidad}`:""}</div><div style={{color:B.subtle,fontSize:11,marginTop:1}}>⏱ {fmt(i.ts_ingreso)} · por {i.operario}</div></div>
+          <div style={{color:B.subtle}}>›</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* SESIÓN PERSISTENTE (12 h): evita re-loguear en cada apertura de la PWA.
+   Se guarda solo el id; el usuario se rebusca en la lista actualizada,
+   así los cambios de permisos hechos por el admin se aplican al restaurar. */
+const SESSION_HS=12;
+const restoreSession=()=>{
+  const s=LS.get("_session",null);
+  if(!s||!s.id) return null;
+  if(Date.now()-s.ts>SESSION_HS*3600*1000){ LS.del("_session"); return null; }
+  return LS.get("users").find(u=>u.id===s.id)||null;
+};
+
+/* APP */
+function App(){
+  const [user,setUser]=useState(null);
+  const [screen,setScreen]=useState("home");
+  const [syncing,setSyncing]=useState(SUPA_READY);
+  const [syncErr,setSyncErr]=useState(false);
+  const [obN,setObN]=useState(0); // registros pendientes de subir (outbox)
+
+  // Al abrir: 1) reintentar lo pendiente de subir, 2) bajar datos frescos, 3) restaurar sesión
+  useEffect(()=>{
+    if(!SUPA_READY){ setUser(restoreSession()); setSyncing(false); return; }
+    let alive=true;
+    obFlush().then(()=>pullAll()).then(ok=>{ if(!alive)return; setSyncErr(!ok); setUser(restoreSession()); setSyncing(false); });
+    return ()=>{alive=false;};
+  },[]);
+
+  // Refresco periódico del contador de pendientes del outbox
+  useEffect(()=>{
+    const upd=()=>setObN(obGet().length);
+    upd();
+    const t=setInterval(upd,10000);
+    return ()=>clearInterval(t);
+  },[]);
+
+  const login=u=>{ LS.set("_session",{id:u.id,ts:Date.now()}); setUser(u); };
+  const logout=()=>{ LS.del("_session"); setUser(null); setScreen("home"); };
+  const retryOutbox=()=>{ obFlush().then(()=>setObN(obGet().length)); };
+
+  if(syncing) return (
+    <div style={{minHeight:"100vh",background:B.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:14}}>
+      <img src={B.logo} alt="Chefexprés" style={{height:46,objectFit:"contain"}} onError={e=>e.target.style.display="none"}/>
+      <div style={{color:B.muted,fontSize:13}}>Sincronizando datos…</div>
+    </div>
+  );
+
+  if(!user) return <Login onLogin={login} syncErr={syncErr}/>;
+  const guard=(perm,node)=> perm ? node : <div style={{color:B.red,padding:20,textAlign:"center"}}>Sin acceso a esta sección.</div>;
+  const content=()=>{
+    switch(screen){
+      case "home":     return <Dashboard user={user} setScreen={setScreen}/>;
+      case "mp":       return guard(can(user,"mp"),<IngresoMP user={user}/>);
+      case "rellenos": return guard(can(user,"rellenos"),<ProduccionScreen user={user} cfg={CFGS.rellenos}/>);
+      case "masas":    return guard(can(user,"masas"),<ProduccionScreen user={user} cfg={CFGS.masas}/>);
+      case "semi":     return guard(can(user,"semi"),<ProduccionScreen user={user} cfg={CFGS.semi}/>);
+      case "pt":       return guard(can(user,"pt"),<ProduccionScreen user={user} cfg={CFGS.pt}/>);
+      case "anulaciones": return guard(can(user,"aprobar"),<Anulaciones user={user}/>);
+      case "traze":    return guard(can(user,"traze"),<Trazabilidad/>);
+      case "efic":     return guard(can(user,"efic"),<Eficiencia/>);
+      case "exportar": return guard(can(user,"exportar"),<Exportar/>);
+      case "cap":      return <Capacitacion user={user}/>;
+      case "limpieza": return guard(can(user,"limpieza"),<Limpiezas user={user}/>);
+      case "insumoslimp": return guard(can(user,"insumoslimp"),<InsumosLimpieza user={user}/>);
+      case "config":   return guard(user.esAdmin,<Configuracion/>);
+      case "zonas":    return guard(user.esAdmin,<ConfigZonas/>);
+      case "usuarios": return guard(user.esAdmin,<Usuarios currentUser={user}/>);
+      default:         return <Dashboard user={user} setScreen={setScreen}/>;
+    }
+  };
+  return (
+    <div style={{minHeight:"100vh",background:B.bg}}>
+      <div style={{background:B.surface,borderBottom:`1px solid ${B.border}`,padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:10}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>{screen!=="home"&&<button onClick={()=>setScreen("home")} style={{background:"none",border:"none",color:B.accent,fontSize:22,cursor:"pointer",padding:0,lineHeight:1}}>‹</button>}<img src={B.logo} alt="Chefexprés" style={{height:32,objectFit:"contain"}} onError={e=>e.target.style.display="none"}/>{ENV==="testing"?<span style={{color:B.yellow,fontSize:10,fontWeight:700,background:"#3D2C00",padding:"1px 6px",borderRadius:4}}>TESTING</span>:<span style={{color:B.accent,fontSize:10,fontWeight:700,background:B.accentD,padding:"1px 6px",borderRadius:4}}>PRODUCCIÓN</span>}{!SUPA_READY&&<span style={{color:B.muted,fontSize:10,fontWeight:700,background:B.card,padding:"1px 6px",borderRadius:4}}>SIN CONECTAR</span>}{obN>0&&<span onClick={retryOutbox} title="Registros guardados en este dispositivo que aún no llegaron a la nube. Tocá para reintentar." style={{color:B.amber,fontSize:10,fontWeight:700,background:"#3D2C00",padding:"1px 6px",borderRadius:4,cursor:"pointer"}}>⏳ {obN} sin subir</span>}</div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{textAlign:"right"}}><div style={{fontSize:11,fontWeight:700,color:B.text}}>{user.nombre}</div><div style={{fontSize:10,color:B.muted}}>{user.esAdmin?"Administrador":"Operativo"}</div></div><button onClick={logout} style={{background:B.card,border:`1px solid ${B.border}`,borderRadius:6,padding:"3px 8px",color:B.muted,fontSize:11,cursor:"pointer"}}>Salir</button></div>
+      </div>
+      <div style={{maxWidth:680,margin:"0 auto",padding:"20px 14px 40px"}}>{content()}</div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+<script>if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));</script>
+</body>
+</html>
