@@ -15,6 +15,10 @@ JSX se transpila en el navegador.
 - `sw.js` — Service Worker (cachea el shell offline; HTML network-first, estáticos stale-while-revalidate).
 - `manifest.json` — manifest de la PWA.
 - `icon-*.png`, `apple-touch-icon.png`, `favicon*.png/.ico` — íconos de la app.
+- `supabase/SCHEMA.md` — esquema de la base (tablas y columnas), documentado
+  a mano a partir de un dump de Supabase. La base se administra manualmente
+  desde el dashboard de Supabase, no hay migraciones automatizadas en este
+  repo — ver ese archivo para cómo mantenerlo al día.
 
 ## Entornos (testing / producción)
 

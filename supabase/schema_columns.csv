@@ -1,0 +1,184 @@
+table_name,column_name,data_type,is_nullable,column_default
+catalogos,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+catalogos,data,jsonb,NO,null
+catalogos,updated_at,timestamp with time zone,NO,now()
+consumos,id,uuid,NO,gen_random_uuid()
+consumos,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+consumos,destino_tabla,text,NO,null
+consumos,destino_id,uuid,NO,null
+consumos,origen_tabla,text,NO,null
+consumos,origen_id,uuid,NO,null
+consumos,cantidad,numeric,YES,null
+consumos,unidad,text,YES,null
+consumos,created_at,timestamp with time zone,NO,now()
+distribucion,id,uuid,NO,gen_random_uuid()
+distribucion,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+distribucion,pt_id,uuid,YES,null
+distribucion,lote_pt,text,YES,null
+distribucion,cliente,text,YES,null
+distribucion,cantidad,numeric,YES,null
+distribucion,unidad,text,YES,null
+distribucion,fecha_entrega,date,YES,null
+distribucion,remito,text,YES,null
+distribucion,obs,text,YES,null
+distribucion,usuario_id,uuid,YES,null
+distribucion,created_at,timestamp with time zone,NO,now()
+empresas,id,uuid,NO,gen_random_uuid()
+empresas,nombre,text,NO,null
+empresas,created_at,timestamp with time zone,NO,now()
+insumos_limpieza,id,uuid,NO,gen_random_uuid()
+insumos_limpieza,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+insumos_limpieza,insumo,text,YES,null
+insumos_limpieza,proveedor,text,YES,null
+insumos_limpieza,lote,text,YES,null
+insumos_limpieza,remito,text,YES,null
+insumos_limpieza,cantidad,numeric,YES,null
+insumos_limpieza,unidad,text,YES,null
+insumos_limpieza,fecha_vto,date,YES,null
+insumos_limpieza,apto_alimenticio,boolean,YES,false
+insumos_limpieza,nro_certificado,text,YES,null
+insumos_limpieza,obs,text,YES,null
+insumos_limpieza,operario,text,YES,null
+insumos_limpieza,usuario_id,uuid,YES,null
+insumos_limpieza,estado,text,NO,'disponible'::text
+insumos_limpieza,ts_ingreso,timestamp with time zone,NO,now()
+insumos_limpieza,created_at,timestamp with time zone,NO,now()
+masas,id,uuid,NO,gen_random_uuid()
+masas,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+masas,tipo,text,YES,null
+masas,lote,text,YES,null
+masas,cantidad,numeric,YES,null
+masas,unidad,text,YES,null
+masas,fecha_vto,date,YES,null
+masas,obs,text,YES,null
+masas,cantidad_consumida,numeric,YES,null
+masas,cantidad_scrap,numeric,YES,null
+masas,unidad_scrap,text,YES,null
+masas,operario,text,YES,null
+masas,usuario_id,uuid,YES,null
+masas,estado,text,NO,'en_proceso'::text
+masas,anulacion,jsonb,YES,null
+masas,ts_inicio,timestamp with time zone,YES,null
+masas,ts_fin,timestamp with time zone,YES,null
+masas,created_at,timestamp with time zone,NO,now()
+movimientos_stock,id,uuid,NO,gen_random_uuid()
+movimientos_stock,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+movimientos_stock,tabla,text,YES,null
+movimientos_stock,item_id,uuid,YES,null
+movimientos_stock,tipo,text,YES,null
+movimientos_stock,cantidad,numeric,YES,null
+movimientos_stock,unidad,text,YES,null
+movimientos_stock,motivo,text,YES,null
+movimientos_stock,usuario_id,uuid,YES,null
+movimientos_stock,created_at,timestamp with time zone,NO,now()
+mp,id,uuid,NO,gen_random_uuid()
+mp,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+mp,proveedor,text,YES,null
+mp,material,text,YES,null
+mp,lote,text,YES,null
+mp,cantidad,numeric,YES,null
+mp,unidad,text,YES,null
+mp,fecha_vto,date,YES,null
+mp,obs,text,YES,null
+mp,retrasada,boolean,YES,false
+mp,ts_ingreso,timestamp with time zone,YES,null
+mp,ts_carga,timestamp with time zone,YES,null
+mp,demora_min,integer,YES,0
+mp,condiciones,text,YES,null
+mp,cantidad_consumida,numeric,YES,null
+mp,cantidad_scrap,numeric,YES,null
+mp,unidad_scrap,text,YES,null
+mp,operario,text,YES,null
+mp,usuario_id,uuid,YES,null
+mp,estado,text,NO,'disponible'::text
+mp,anulacion,jsonb,YES,null
+mp,created_at,timestamp with time zone,NO,now()
+mp,remito,text,YES,null
+pt,id,uuid,NO,gen_random_uuid()
+pt,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+pt,tipo,text,YES,null
+pt,lote,text,YES,null
+pt,cantidad,numeric,YES,null
+pt,unidad,text,YES,null
+pt,fecha_vto,date,YES,null
+pt,obs,text,YES,null
+pt,cantidad_consumida,numeric,YES,null
+pt,cantidad_scrap,numeric,YES,null
+pt,unidad_scrap,text,YES,null
+pt,operario,text,YES,null
+pt,usuario_id,uuid,YES,null
+pt,estado,text,NO,'en_proceso'::text
+pt,anulacion,jsonb,YES,null
+pt,ts_inicio,timestamp with time zone,YES,null
+pt,ts_fin,timestamp with time zone,YES,null
+pt,created_at,timestamp with time zone,NO,now()
+ranking,id,uuid,NO,gen_random_uuid()
+ranking,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+ranking,usuario_id,uuid,YES,null
+ranking,nombre,text,YES,null
+ranking,mejor_pct,integer,NO,0
+ranking,intentos,integer,NO,0
+ranking,ultima,timestamp with time zone,YES,null
+registros_limpieza,id,uuid,NO,gen_random_uuid()
+registros_limpieza,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+registros_limpieza,zona_id,uuid,YES,null
+registros_limpieza,zona_nombre,text,YES,null
+registros_limpieza,poes,text,YES,null
+registros_limpieza,items_ok,jsonb,NO,'[]'::jsonb
+registros_limpieza,observaciones,text,YES,null
+registros_limpieza,operario,text,YES,null
+registros_limpieza,usuario_id,uuid,YES,null
+registros_limpieza,ts_registro,timestamp with time zone,NO,now()
+registros_limpieza,created_at,timestamp with time zone,NO,now()
+rellenos,id,uuid,NO,gen_random_uuid()
+rellenos,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+rellenos,tipo,text,YES,null
+rellenos,lote,text,YES,null
+rellenos,cantidad,numeric,YES,null
+rellenos,unidad,text,YES,null
+rellenos,fecha_vto,date,YES,null
+rellenos,obs,text,YES,null
+rellenos,cantidad_consumida,numeric,YES,null
+rellenos,cantidad_scrap,numeric,YES,null
+rellenos,unidad_scrap,text,YES,null
+rellenos,operario,text,YES,null
+rellenos,usuario_id,uuid,YES,null
+rellenos,estado,text,NO,'en_proceso'::text
+rellenos,anulacion,jsonb,YES,null
+rellenos,ts_inicio,timestamp with time zone,YES,null
+rellenos,ts_fin,timestamp with time zone,YES,null
+rellenos,created_at,timestamp with time zone,NO,now()
+semi,id,uuid,NO,gen_random_uuid()
+semi,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+semi,tipo,text,YES,null
+semi,lote,text,YES,null
+semi,cantidad,numeric,YES,null
+semi,unidad,text,YES,null
+semi,fecha_vto,date,YES,null
+semi,obs,text,YES,null
+semi,cantidad_consumida,numeric,YES,null
+semi,cantidad_scrap,numeric,YES,null
+semi,unidad_scrap,text,YES,null
+semi,operario,text,YES,null
+semi,usuario_id,uuid,YES,null
+semi,estado,text,NO,'en_proceso'::text
+semi,anulacion,jsonb,YES,null
+semi,ts_inicio,timestamp with time zone,YES,null
+semi,ts_fin,timestamp with time zone,YES,null
+semi,created_at,timestamp with time zone,NO,now()
+usuarios,id,uuid,NO,gen_random_uuid()
+usuarios,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+usuarios,auth_id,uuid,YES,null
+usuarios,usr,text,NO,null
+usuarios,pw,text,YES,null
+usuarios,nombre,text,NO,null
+usuarios,es_admin,boolean,NO,false
+usuarios,permisos,jsonb,NO,'{}'::jsonb
+usuarios,created_at,timestamp with time zone,NO,now()
+zonas_limpieza,id,uuid,NO,gen_random_uuid()
+zonas_limpieza,empresa_id,uuid,NO,'00000000-0000-0000-0000-0000000000c1'::uuid
+zonas_limpieza,nombre,text,NO,null
+zonas_limpieza,poes,text,YES,null
+zonas_limpieza,items,jsonb,NO,'[]'::jsonb
+zonas_limpieza,activo,boolean,NO,true
+zonas_limpieza,created_at,timestamp with time zone,NO,now()
