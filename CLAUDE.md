@@ -166,7 +166,12 @@ SELECT count(*) FROM usuarios;
 ```
 Correr en el SQL Editor de **cada** proyecto (testing y producción) que se quiera mantener vivo.
 
-**Pendiente de automatizar:** GitHub Action con cron cada 2-3 días que le pegue esta misma consulta vía la API REST de Supabase, usando la `service_role` key guardada como secret del repo. No se llegó a armar todavía — decisión pendiente de si Lucas tiene/quiere un repo de GitHub para alojarlo, o prefiere otra alternativa (cron de servidor propio, Uptime Robot contra una Edge Function, etc.).
+**Automatizado (25/08/2026):** `.github/workflows/supabase-keepalive.yml` en
+este repo — corre cada ~3 días (+ disparo manual desde la pestaña Actions)
+y pega un SELECT liviano contra `usuarios` en testing y producción. Usa las
+publishable (`anon`) keys hardcodeadas directo en el workflow (son públicas
+por diseño, las mismas que ya están en `index.html`) — no `service_role`,
+así que no requiere configurar secrets en el repo.
 
 **Nota comercial:** cuando se facture la suscripción mensual, pasar el proyecto del cliente a **Supabase Pro ($25/mes)** elimina el problema de raíz (no hay pausa en planes pagos) y además agrega backups diarios — esto ya estaba contemplado en el modelo comercial original como parte del paquete para clientes en Pro.
 
