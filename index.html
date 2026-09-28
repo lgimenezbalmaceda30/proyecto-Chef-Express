@@ -445,7 +445,9 @@ const requestAnul=(store,id,user,motivo)=>{
     if(directo) return {...i,estado:"anulado",anulacion:{estado:"aprobada",solicitante:user.nombre,motivo_solicitud:motivo,solicitud_ts:now(),resuelto_por:user.nombre,motivo_resolucion:"Anulación directa (con permiso de aprobación)",resuelto_ts:now()}};
     return {...i,anulacion:{estado:"pendiente",solicitante:user.nombre,motivo_solicitud:motivo,solicitud_ts:now()}};
   });
-  LS.set(store,upd); if(sb) pushRows(store, upd.filter(i=>i.id===id)); return upd;
+  LS.set(store,upd); if(sb) pushRows(store, upd.filter(i=>i.id===id));
+  if(directo) refreshConsumidoCache(upd.find(i=>i.id===id)); // se anuló: libera stock de sus fuentes
+  return upd;
 };
 const resolveAnul=(store,id,user,aprobar,motivoRes)=>{
   const list=LS.get(store);
@@ -454,7 +456,9 @@ const resolveAnul=(store,id,user,aprobar,motivoRes)=>{
     if(aprobar) return {...i,estado:"anulado",anulacion:{...i.anulacion,estado:"aprobada",resuelto_por:user.nombre,motivo_resolucion:motivoRes,resuelto_ts:now()}};
     return {...i,anulacion:{...i.anulacion,estado:"rechazada",resuelto_por:user.nombre,motivo_resolucion:motivoRes,resuelto_ts:now()}};
   });
-  LS.set(store,upd); if(sb) pushRows(store, upd.filter(i=>i.id===id)); return upd;
+  LS.set(store,upd); if(sb) pushRows(store, upd.filter(i=>i.id===id));
+  if(aprobar) refreshConsumidoCache(upd.find(i=>i.id===id)); // se anuló: libera stock de sus fuentes
+  return upd;
 };
 const countPendientes=()=>ALL_STORES.reduce((acc,s)=>acc+LS.get(s).filter(i=>i.anulacion&&i.anulacion.estado==="pendiente").length,0);
 
@@ -500,19 +504,59 @@ const traceBack=(store,item)=>{
   return res;
 };
 
+// posibles destinos directos de cada store: rellenos/masas consumen mp;
+// semi consume rellenos/masas; pt consume semi. (módulo-level: la reutilizan
+// tanto traceForward como consumidoTotal, más abajo)
+const destByStore={mp:["rellenos","masas"],rellenos:["semi"],masas:["semi"],semi:["pt"]};
+
 // HACIA ADELANTE: en qué se usó este ítem (sus destinos). Busca quién lo tiene en sus _ids.
 const traceForward=(store,item)=>{
   const fieldByStore={mp:"mp_ids",rellenos:"relleno_ids",masas:"masa_ids",semi:"semi_ids"};
   const f=fieldByStore[store];
   if(!f) return {}; // pt no tiene destino interno
   const res={};
-  // posibles destinos: rellenos/masas consumen mp; semi consume rellenos/masas; pt consume semi
-  const destByStore={mp:["rellenos","masas"],rellenos:["semi"],masas:["semi"],semi:["pt"]};
   (destByStore[store]||[]).forEach(destStore=>{
     const items=LS.get(destStore).filter(x=>(x[f]||[]).includes(item.id));
     if(items.length) res[destStore]=items;
   });
   return res;
+};
+
+// Cuánto se consumió de un ítem hasta ahora, sumando el "consumo" de todo lo
+// que lo usó como fuente (un solo nivel — "consumo" siempre referencia a la
+// fuente directa). No cuenta consumo de ítems ya anulados: anular libera esa
+// cantidad de vuelta. Es la misma agregación que Trazabilidad ya usaba solo
+// para mostrar "usado Xkg" — acá además sirve para VALIDAR al guardar.
+const consumidoTotal=(store,id)=>{
+  let total=0;
+  (destByStore[store]||[]).forEach(destStore=>{
+    LS.get(destStore).forEach(d=>{
+      if(d.estado==="anulado") return;
+      const c=d.consumo&&d.consumo[id];
+      if(c) total+=Number(c.cantidad)||0;
+    });
+  });
+  return total;
+};
+
+// Cantidad de un ítem que todavía se puede consumir. null si el ítem
+// todavía no tiene cantidad cargada (en proceso, no terminó de pesarse) —
+// en ese caso no se puede saber cuánto hay disponible todavía.
+const stockDisponible=(store,item)=>item.cantidad==null ? null : item.cantidad-consumidoTotal(store,item.id);
+
+// "cantidad_consumida" es un caché denormalizado por ítem (para lectura
+// rápida en reportes/exportación, sin tener que sumar "consumo" a mano) —
+// la fuente de verdad sigue siendo el mapa "consumo" de cada consumidor;
+// esto solo lo refleja. Se llama después de crear un ítem con fuentes, y
+// después de anular/desanular uno (anular libera cantidad de sus fuentes).
+const refreshConsumidoCache=item=>{
+  if(!item||!item.consumo) return;
+  const idsByStore={};
+  Object.entries(item.consumo).forEach(([id,c])=>{ (idsByStore[c.store]=idsByStore[c.store]||[]).push(id); });
+  Object.entries(idsByStore).forEach(([store,ids])=>{
+    const updSrc=LS.get(store).map(x=>ids.includes(x.id)?{...x,cantidad_consumida:consumidoTotal(store,x.id)}:x);
+    LS.set(store,updSrc); pushRows(store,updSrc.filter(x=>ids.includes(x.id)));
+  });
 };
 
 // Construye la descendencia completa hacia adelante (todos los niveles hasta PT)
@@ -834,6 +878,18 @@ function ProduccionScreen({user,cfg}){
     for(const s of cfg.sources){
       for(const [,q] of Object.entries(form.sources[s.store]||{})){ if(!q||parseFloat(q)<=0) return alert(`Indicá la cantidad consumida de cada ${s.label.toLowerCase()} seleccionado/a.`); }
     }
+    // Bloqueo real de sobreconsumo: la cantidad pedida de cada fuente no
+    // puede superar lo que REALMENTE queda disponible (lo producido menos
+    // lo que ya consumieron otros lotes, no solo lo pedido acá). Antes esto
+    // era apenas una advertencia visual que no impedía guardar.
+    for(const s of cfg.sources){
+      const srcItems=LS.get(s.store);
+      for(const [id,q] of Object.entries(form.sources[s.store]||{})){
+        const srcItem=srcItems.find(x=>x.id===id); if(!srcItem) continue;
+        const disp=stockDisponible(s.store,srcItem);
+        if(disp!=null&&parseFloat(q)>disp) return alert(`No podés usar ${q}${srcItem.unidad||""} de "${s.name(srcItem)}" (lote ${srcItem.lote}) — solo quedan ${disp}${srcItem.unidad||""} disponibles.`);
+      }
+    }
     // Aviso si no se seleccionó ningún insumo: quedaría sin trazabilidad hacia atrás
     const nSel=cfg.sources.reduce((a,s)=>a+Object.keys(form.sources[s.store]||{}).length,0);
     if(nSel===0&&!window.confirm("No seleccionaste ningún insumo de origen. Este lote quedará SIN trazabilidad hacia atrás. ¿Continuar igual?")) return;
@@ -852,9 +908,13 @@ function ProduccionScreen({user,cfg}){
       operario:user.nombre,estado:"en_proceso",anulacion:null,
     };
     const upd=[item,...items]; LS.set(cfg.store,upd); setItems(upd); setForm(makeF0()); setView("list"); pushRows(cfg.store,[item]);
+    refreshConsumidoCache(item); // refleja en las fuentes recién consumidas cuánto les queda
   };
-  // disponibilidad de un ítem fuente: cantidad si está cargada, null si aún en proceso
-  const srcAvail=item=> typeof item.cantidad==="number"?item.cantidad:null;
+  // disponibilidad REAL de un ítem fuente: lo que produjo menos lo que ya
+  // consumieron otros lotes (no solo lo que produjo — antes comparaba
+  // contra el total original, así que un mismo lote se podía sobre-consumir
+  // entre varios lotes distintos sin que nada lo impidiera).
+  const srcAvail=(store,item)=>stockDisponible(store,item);
   // terminar = registrar cantidad real producida + cerrar contador
   const finalizar=(id,cant)=>{ const upd=items.map(i=>i.id===id?{...i,cantidad:parseFloat(cant),timestamp_fin:now(),estado:"terminado"}:i); LS.set(cfg.store,upd); refresh(upd); setFinishing(false); setFinQty(""); pushRows(cfg.store,upd.filter(i=>i.id===id)); };
   const cambiar=(id,estado)=>{ const upd=items.map(i=>i.id===id?{...i,estado}:i); LS.set(cfg.store,upd); refresh(upd); pushRows(cfg.store,upd.filter(i=>i.id===id)); };
@@ -895,7 +955,7 @@ function ProduccionScreen({user,cfg}){
             {avail.map(item=>{
               const sel=item.id in (form.sources[src.store]||{});
               const qty=form.sources[src.store]?.[item.id]??"";
-              const disp=srcAvail(item); // number o null (si aún en proceso)
+              const disp=srcAvail(src.store,item); // number o null (si aún en proceso)
               const exceso=sel&&qty!==""&&disp!==null&&parseFloat(qty)>disp;
               const dv=vence(item);
               return (
@@ -1276,19 +1336,16 @@ function Trazabilidad(){
     const back=backwardChain(store,item);   // {semi,rellenos,masas,mp}
     const fwd=forwardChain(store,item);     // {rellenos,masas,semi,pt}
 
-    // mapa de consumo (cuánto se usó de cada ítem), recorriendo todos los que tienen consumo
-    const consMap={};
-    [...LS.get("rellenos"),...LS.get("masas"),...LS.get("semi"),...LS.get("pt")].forEach(p=>{
-      if(p.consumo) Object.entries(p.consumo).forEach(([id,c])=>{ consMap[id]=(consMap[id]||0)+(c.cantidad||0); });
-    });
-    const usado=i=>consMap[i.id]?` · usado ${consMap[i.id]}${i.unidad||""}`:"";
+    // cuánto se usó de un ítem (mismo cálculo que valida el stock al cargar
+    // producción, ver consumidoTotal — no cuenta consumo de ítems anulados)
+    const usado=(store,i)=>{ const c=consumidoTotal(store,i.id); return c?` · usado ${c}${i.unidad||""}`:""; };
 
     const Item=({store,i,dim})=>(
       <div style={{...css.card,padding:"10px 12px",marginBottom:6,borderColor:`${STORE_META[store].color}40`,opacity:i.estado==="anulado"?0.45:1}}>
         {i.estado==="anulado"&&<div style={{color:B.red,fontSize:11,marginBottom:3}}>⛔ Anulado</div>}
         <div style={{color:B.text,fontSize:13,fontWeight:700}}>{STORE_META[store].emoji} {itemName(store,i)}</div>
         <div style={{color:B.muted,fontSize:11,marginTop:2}}>
-          {store==="mp"?`${i.proveedor} · `:""}Lote {i.lote||"—"}{i.remito?` · Rem ${i.remito}`:""} · {store==="mp"?`${i.cantidad}${i.unidad}`:qtyTxt(i)}{dim?usado(i):""}
+          {store==="mp"?`${i.proveedor} · `:""}Lote {i.lote||"—"}{i.remito?` · Rem ${i.remito}`:""} · {store==="mp"?`${i.cantidad}${i.unidad}`:qtyTxt(i)}{dim?usado(store,i):""}
         </div>
         <div style={{color:B.subtle,fontSize:11,marginTop:2}}>👤 {i.operario} · {fmt(itemTs(i))}</div>
       </div>
@@ -1310,7 +1367,7 @@ function Trazabilidad(){
       const rowsOf=(arr,store)=>arr.map(i=>fila([
         STORE_META[store].label, itemName(store,i), i.lote||"—", i.remito||"—",
         store==="mp"?`${i.cantidad??"—"} ${i.unidad||""}`:qtyTxt(i),
-        consMap[i.id]?`${consMap[i.id]} ${i.unidad||""}`:"—",
+        consumidoTotal(store,i.id)?`${consumidoTotal(store,i.id)} ${i.unidad||""}`:"—",
         i.fecha_vto||"—", fmt(itemTs(i)), i.operario||"—", i.estado||"—"
       ])).join("");
       const tabla=(titulo,rows)=>rows?`<h3>${titulo}</h3><table><thead><tr><th>Etapa</th><th>Nombre</th><th>Lote</th><th>Remito</th><th>Producido</th><th>Usado</th><th>Vto</th><th>Fecha</th><th>Responsable</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table>`:"";

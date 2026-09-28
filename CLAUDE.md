@@ -71,6 +71,33 @@ Se hizo una auditoría completa de código + seguridad. Fixes ya aplicados y en 
 - `consumos.delete` ahora filtra también por `empresa_id` (antes solo por tabla/id destino).
 - `consumos.unidad` se completa desde el ítem origen (antes siempre `null`).
 
+### Validación real de stock (auditoría post-Fase A, 28/09/2026)
+- **Bug corregido:** al cargar producción, el aviso de "exceso" comparaba la
+  cantidad pedida contra `item.cantidad` — el total que ese lote produjo
+  alguna vez — y encima era solo una advertencia visual, no bloqueaba el
+  guardado. Un mismo lote de relleno/masa/semi se podía consumir de más
+  entre varios lotes distintos sin que nada lo impidiera (los números no
+  cerraban, grave para una app cuyo producto central es la trazabilidad).
+- **Fix:** `consumidoTotal(store,id)`/`stockDisponible(store,item)`
+  (`index.html`, cerca de `traceForward`) calculan en vivo cuánto queda
+  disponible de un ítem, sumando su `consumo` real (sin contar consumo de
+  ítems anulados — anular libera esa cantidad). `ProduccionScreen.save()`
+  ahora **bloquea** (no solo avisa) si se pide más de lo disponible.
+  Trazabilidad se actualizó para usar el mismo cálculo (antes tenía su
+  propia agregación local, `consMap`, que además no excluía anulados —
+  quedaban dos formas ligeramente distintas de calcular lo mismo).
+- De paso, `cantidad_consumida` (columna que ya existía en el esquema de
+  Supabase, siempre `null`, sin ningún código que la escribiera) ahora se
+  usa como caché denormalizado — se recalcula y sube cada vez que se
+  consume o se anula algo (`refreshConsumidoCache`), para poder leer
+  "cuánto se consumió de este lote" en reportes/exportación sin tener que
+  sumar `consumo` a mano. **No** es la fuente de verdad (eso sigue siendo
+  `consumo`/`consumos`) — es solo una copia de lectura rápida.
+- `cantidad_scrap`/`unidad_scrap` quedan **sin tocar**, deliberadamente:
+  parecen pensados para otra cosa (merma propia del ítem al finalizarlo,
+  no consumo de otros) y su semántica exacta no está clara — no se quiso
+  adivinar y wireear mal un campo ambiguo.
+
 ### Contraseñas por defecto y auth real (28/09/2026)
 Se resolvió junto con la migración de auth de la §5: las 3 contraseñas por
 defecto (`admin`/`supervisor`/`operario`) se rotan como parte del propio
