@@ -66,6 +66,15 @@ const SUPA_READY = SUPA_CFG && !SUPA_CFG.url.startsWith("PEGAR_") && typeof supa
 const sb = SUPA_READY ? supabase.createClient(SUPA_CFG.url, SUPA_CFG.key) : null;
 const EMPRESA_ID = "00000000-0000-0000-0000-0000000000c1"; // Chefexprés
 
+/* AUTH (Supabase Auth real) — el login sigue pidiendo un usuario corto
+   (admin, mgonzalez, etc.), que acá se mapea a un email sintético bajo un
+   dominio placeholder que nunca recibe mails reales (los usuarios se crean
+   pre-confirmados desde el Dashboard, sin flujo de invitación). El día que
+   se necesite email real por persona, alcanza con cambiar el email de esa
+   cuenta en auth.users — no toca este código ni el esquema. */
+const AUTH_EMAIL_DOMAIN = "chefexpres.local";
+const usrToAuthEmail = usr => `${usr.trim().toLowerCase()}@${AUTH_EMAIL_DOMAIN}`;
+
 
 /* BRAND */
 const B = {
@@ -230,9 +239,9 @@ async function pullAll(){
     // catálogos
     const cat = await sb.from("catalogos").select("data").eq("empresa_id",EMPRESA_ID).maybeSingle();
     if(cat.data && cat.data.data) LS.set("catalogos", cat.data.data);
-    // usuarios
+    // usuarios (sin "pw": con Auth real la contraseña no vive en esta tabla)
     const us = await sb.from("usuarios").select("*").eq("empresa_id",EMPRESA_ID);
-    if(us.data) LS.set("users", us.data.map(u=>({ id:u.id, usr:u.usr, pw:u.pw, nombre:u.nombre, esAdmin:u.es_admin, permisos:u.permisos||{} })));
+    if(us.data) LS.set("users", us.data.map(u=>({ id:u.id, usr:u.usr, authId:u.auth_id, nombre:u.nombre, esAdmin:u.es_admin, permisos:u.permisos||{} })));
     // mp + producción (reconstruyendo consumo desde tabla consumos)
     const cons = await sb.from("consumos").select("*").eq("empresa_id",EMPRESA_ID);
     const consByDest = {};
@@ -289,6 +298,22 @@ async function pullAll(){
   }catch(e){ console.warn("pullAll", e.message); return false; }
 }
 
+// Dado el auth.uid() de una sesión de Supabase Auth ya iniciada, busca la
+// fila de "usuarios" vinculada (por auth_id) y arma el mismo shape que
+// siempre consumió el resto de la app: {id,usr,nombre,esAdmin,permisos}.
+// Devuelve null si la sesión de Auth existe pero no tiene perfil vinculado
+// (cuenta huérfana: se creó en auth.users pero nadie completó nombre/permisos,
+// o se borró la fila de "usuarios" sin borrar la cuenta de Auth).
+async function loadUserFromAuth(authId){
+  if(!sb||!authId) return null;
+  try{
+    const { data, error } = await sb.from("usuarios").select("*").eq("auth_id",authId).maybeSingle();
+    if(error){ console.warn("loadUserFromAuth", error.message); return null; }
+    if(!data) return null;
+    return { id:data.id, usr:data.usr, authId:data.auth_id, nombre:data.nombre, esAdmin:data.es_admin, permisos:data.permisos||{} };
+  }catch(e){ console.warn("loadUserFromAuth", e.message); return null; }
+}
+
 // Guarda una zona de limpieza en Supabase (con reintento vía outbox)
 async function pushZona(z){ syncOp({fn:"zona", row:{ id:z.id, empresa_id:EMPRESA_ID, nombre:z.nombre, poes:z.poes||null, items:z.items||[], activo:z.activo!==false }}); }
 async function delZona(id){ syncOp({fn:"delzona", id}); }
@@ -299,19 +324,22 @@ async function pushInsumo(r){ syncOp({fn:"insumo", row:{ id:r.id, empresa_id:EMP
 
 // Guarda catálogos en Supabase
 async function pushCatalogos(data){ syncOp({fn:"catalogos", row:{ empresa_id:EMPRESA_ID, data, updated_at:new Date().toISOString() }}); }
-// Guarda un usuario en Supabase
-async function pushUser(u){ syncOp({fn:"user", row:{ id:u.id, empresa_id:EMPRESA_ID, usr:u.usr, pw:u.pw, nombre:u.nombre, es_admin:!!u.esAdmin, permisos:u.permisos||{} }}); }
+// Guarda un usuario en Supabase (sin "pw": con Auth real, la contraseña
+// vive en auth.users, no en esta tabla — ver loadUserFromAuth más abajo)
+async function pushUser(u){ syncOp({fn:"user", row:{ id:u.id, empresa_id:EMPRESA_ID, usr:u.usr, nombre:u.nombre, es_admin:!!u.esAdmin, permisos:u.permisos||{} }}); }
 // Guarda ranking en Supabase
 async function pushRanking(r){ syncOp({fn:"ranking", row:{ empresa_id:EMPRESA_ID, usuario_id:r.userId, nombre:r.nombre, mejor_pct:r.mejorPct, intentos:r.intentos, ultima:r.ultima }}); }
 
 
-/* SEED USUARIOS */
+/* SEED USUARIOS — solo placeholder de display en un dispositivo nuevo antes
+   del primer pullAll(); el login real no lee nada de acá (va contra
+   Supabase Auth), así que no lleva "pw". */
 const USERS_DEF = [
-  {id:"u1",usr:"admin",pw:"1234",nombre:"Admin (config)",esAdmin:true,
+  {id:"u1",usr:"admin",nombre:"Admin (config)",esAdmin:true,
    permisos:{mp:true,rellenos:true,masas:true,semi:true,pt:true,traze:true,efic:true,exportar:true,aprobar:true}},
-  {id:"u2",usr:"supervisor",pw:"1234",nombre:"C. Villalba",esAdmin:false,
+  {id:"u2",usr:"supervisor",nombre:"C. Villalba",esAdmin:false,
    permisos:{mp:true,rellenos:true,masas:true,semi:true,pt:true,traze:true,efic:true,exportar:true,aprobar:true}},
-  {id:"u3",usr:"operario",pw:"1234",nombre:"M. Rodríguez",esAdmin:false,
+  {id:"u3",usr:"operario",nombre:"M. Rodríguez",esAdmin:false,
    permisos:{mp:true,rellenos:true,masas:true,semi:true,pt:true,traze:false,efic:false,exportar:false,aprobar:false}},
 ];
 if(localStorage.getItem(KEY("users"))===null) LS.set("users",USERS_DEF);
@@ -639,9 +667,17 @@ function AnulInfo({item}){
 
 /* LOGIN */
 function Login({onLogin,syncErr}){
-  const [usr,setUsr]=useState(""),[pw,setPw]=useState(""),[err,setErr]=useState("");
-  // trim(): los teclados móviles suelen agregar un espacio final al autocompletar
-  const go=()=>{ const f=LS.get("users").find(u=>u.usr===usr.trim()&&u.pw===pw.trim()); if(f) onLogin(f); else setErr("Usuario o contraseña incorrectos"); };
+  const [usr,setUsr]=useState(""),[pw,setPw]=useState(""),[err,setErr]=useState(""),[busy,setBusy]=useState(false);
+  const go=async()=>{
+    if(!sb) return setErr("Sin conexión con el servidor. Probá de nuevo más tarde.");
+    if(!usr.trim()||!pw.trim()) return setErr("Completá usuario y contraseña");
+    setBusy(true); setErr("");
+    const { data, error } = await sb.auth.signInWithPassword({ email: usrToAuthEmail(usr), password: pw.trim() });
+    if(error){ setBusy(false); return setErr("Usuario o contraseña incorrectos"); }
+    const u = await loadUserFromAuth(data.user.id);
+    if(!u){ await sb.auth.signOut(); setBusy(false); return setErr("Tu cuenta todavía no tiene un perfil asociado. Pedile al administrador que te complete nombre y permisos en Usuarios."); }
+    onLogin(u); // App toma de acá: sincroniza y recién ahí desmonta este componente
+  };
   return (
     <div style={{minHeight:"100vh",background:B.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{...css.card,width:"100%",maxWidth:340,padding:32}}>
@@ -651,10 +687,10 @@ function Login({onLogin,syncErr}){
           <div style={{color:B.muted,fontSize:12,marginTop:3}}>Godoy Cruz, Mendoza · <span style={{color:ENV==="testing"?B.yellow:B.accent,fontWeight:700}}>{ENV==="testing"?"TESTING":"PRODUCCIÓN"}</span></div>
         </div>
         {syncErr&&<div style={{background:"#3D2C00",color:B.yellow,fontSize:11,padding:"8px 10px",borderRadius:6,marginBottom:14}}>⚠️ No se pudo conectar con la base. Trabajando con datos locales; se sincronizará al recuperar conexión.</div>}
-        <Field label="Usuario"><input style={css.input} value={usr} onChange={e=>{setErr("");setUsr(e.target.value)}} onKeyDown={e=>e.key==="Enter"&&go()} placeholder="usuario"/></Field>
-        <Field label="Contraseña"><input style={css.input} type="password" value={pw} onChange={e=>{setErr("");setPw(e.target.value)}} onKeyDown={e=>e.key==="Enter"&&go()} placeholder="contraseña"/></Field>
+        <Field label="Usuario"><input style={css.input} value={usr} onChange={e=>{setErr("");setUsr(e.target.value)}} onKeyDown={e=>e.key==="Enter"&&go()} placeholder="usuario" disabled={busy}/></Field>
+        <Field label="Contraseña"><input style={css.input} type="password" value={pw} onChange={e=>{setErr("");setPw(e.target.value)}} onKeyDown={e=>e.key==="Enter"&&go()} placeholder="contraseña" disabled={busy}/></Field>
         {err&&<div style={{color:B.red,fontSize:12,marginBottom:12}}>{err}</div>}
-        <button style={css.btn} onClick={go}>Ingresar</button>
+        <button style={{...css.btn,opacity:busy?0.6:1}} onClick={go} disabled={busy}>{busy?"Ingresando…":"Ingresar"}</button>
       </div>
     </div>
   );
@@ -1125,42 +1161,61 @@ function Configuracion(){
 function Usuarios({currentUser}){
   const [users,setUsers]=useState(()=>LS.get("users"));
   const [view,setView]=useState("list");
+  const [refreshing,setRefreshing]=useState(false);
   const emptyPerm=()=>Object.fromEntries([...PERM_CARGA,...PERM_FUNC].map(p=>[p.k,false]));
-  const F0={usr:"",pw:"",nombre:"",permisos:emptyPerm()};
+  const F0={usr:"",nombre:"",permisos:emptyPerm()};
   const [form,setForm]=useState(F0);
   const [editId,setEditId]=useState(null);
   const [err,setErr]=useState("");
   const uf=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
   const togP=k=>setForm(p=>({...p,permisos:{...p.permisos,[k]:!p.permisos[k]}}));
 
+  // Alta de usuario nuevo (con Auth real): editar acá solo actualiza nombre/
+  // permisos de un usuario que YA existe (su login se crea en el Dashboard
+  // de Supabase — ver el panel "instrucciones" más abajo). Por eso "save"
+  // ya no crea filas nuevas, solo edita.
   const save=()=>{
-    if(!form.usr||!form.nombre||(!editId&&!form.pw)) return setErr("Completá nombre, usuario y contraseña");
-    if(!editId&&users.find(u=>u.usr===form.usr)) return setErr("Ese usuario ya existe");
-    let upd;
-    if(editId) upd=users.map(u=>u.id===editId?{...u,nombre:form.nombre,permisos:form.permisos,pw:form.pw||u.pw}:u);
-    else upd=[...users,{id:uid(),usr:form.usr,pw:form.pw,nombre:form.nombre,esAdmin:false,permisos:form.permisos}];
+    if(!editId) return; // no debería poder llamarse sin editId, es solo edición
+    if(!form.nombre) return setErr("Completá el nombre");
+    const upd=users.map(u=>u.id===editId?{...u,nombre:form.nombre,permisos:form.permisos}:u);
     LS.set("users",upd); setUsers(upd);
-    const saved = editId ? upd.find(u=>u.id===editId) : upd[upd.length-1];
+    const saved=upd.find(u=>u.id===editId);
     if(saved) pushUser(saved);
     setForm(F0); setEditId(null); setErr(""); setView("list");
   };
-  const del=id=>{ if(id===currentUser.id)return alert("No podés eliminar tu propio usuario"); if(!window.confirm("¿Eliminar usuario?"))return; const upd=users.filter(u=>u.id!==id); LS.set("users",upd); setUsers(upd); syncOp({fn:"deluser",id}); };
-  const startEdit=u=>{ setForm({usr:u.usr,pw:"",nombre:u.nombre,permisos:{...emptyPerm(),...u.permisos}}); setEditId(u.id); setErr(""); setView("form"); };
+  const del=id=>{ if(id===currentUser.id)return alert("No podés eliminar tu propio usuario"); if(!window.confirm("¿Eliminar usuario? (esto no borra su login de Supabase Auth, solo su perfil acá — para eso hay que ir al Dashboard)"))return; const upd=users.filter(u=>u.id!==id); LS.set("users",upd); setUsers(upd); syncOp({fn:"deluser",id}); };
+  const startEdit=u=>{ setForm({usr:u.usr,nombre:u.nombre,permisos:{...emptyPerm(),...u.permisos}}); setEditId(u.id); setErr(""); setView("form"); };
+  const refresh=async()=>{ setRefreshing(true); await pullAll(); setUsers(LS.get("users")); setRefreshing(false); };
+
+  if(view==="instrucciones") return (
+    <div>
+      <button style={css.back} onClick={()=>setView("list")}>← Volver</button>
+      <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:16}}>Dar de alta un usuario nuevo</div>
+      <div style={{...css.card,padding:16,color:B.text,fontSize:13,lineHeight:1.6}}>
+        <p style={{marginBottom:10}}>El login ahora es real (Supabase Auth), así que crear un usuario tiene un paso previo fuera de la app:</p>
+        <ol style={{paddingLeft:18,marginBottom:10}}>
+          <li>Pedile al administrador de Supabase que entre a <b>Authentication → Users → Add user</b>.</li>
+          <li>Email: <code>usuario@chefexpres.local</code> (el "usuario" es el nombre corto con el que va a loguearse acá, ej. <code>mgonzalez</code>).</li>
+          <li>Tildar <b>"Auto Confirm User"</b> y ponerle una contraseña.</li>
+        </ol>
+        <p style={{marginBottom:10}}>En cuanto se crea, aparece automáticamente en esta lista (tocá <b>"🔄 Actualizar lista"</b> si no lo ves) — ahí le completás nombre real y permisos, igual que antes.</p>
+      </div>
+    </div>
+  );
 
   if(view==="form") return (
     <div>
       <button style={css.back} onClick={()=>{setView("list");setEditId(null);setForm(F0);setErr("");}}>← Volver</button>
-      <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:20}}>{editId?"Editar usuario":"Nuevo usuario"}</div>
+      <div style={{color:B.text,fontSize:18,fontWeight:800,marginBottom:20}}>Editar usuario</div>
       <Field label="Nombre completo *"><input style={css.input} value={form.nombre} onChange={uf("nombre")} placeholder="Ej: María González"/></Field>
-      <Field label="Usuario (login) *"><input style={{...css.input,opacity:editId?0.6:1}} value={form.usr} onChange={uf("usr")} placeholder="mgonzalez" disabled={!!editId}/></Field>
-      <Field label={editId?"Nueva contraseña (vacío = no cambiar)":"Contraseña *"}><input style={css.input} type="password" value={form.pw} onChange={uf("pw")} placeholder="contraseña"/></Field>
+      <Field label="Usuario (login)"><input style={{...css.input,opacity:0.6}} value={form.usr} disabled/></Field>
       <div style={css.sec}>Permisos de carga</div>
       {PERM_CARGA.map(p=><PermCheck key={p.k} label={p.label} checked={!!form.permisos[p.k]} onToggle={()=>togP(p.k)}/>)}
       <div style={{...css.sec,marginTop:14}}>Permisos de función</div>
       {PERM_FUNC.map(p=><PermCheck key={p.k} label={p.label} checked={!!form.permisos[p.k]} onToggle={()=>togP(p.k)}/>)}
       <div style={{color:B.muted,fontSize:11,marginTop:8,marginBottom:14,padding:"8px 12px",background:B.surface,borderRadius:8}}>ℹ️ La configuración de catálogos y la gestión de usuarios son exclusivas del administrador y no se pueden delegar.</div>
       {err&&<div style={{color:B.red,fontSize:12,marginBottom:12}}>{err}</div>}
-      <button style={css.btn} onClick={save}>{editId?"Guardar cambios":"Crear usuario"}</button>
+      <button style={css.btn} onClick={save}>Guardar cambios</button>
     </div>
   );
 
@@ -1168,7 +1223,10 @@ function Usuarios({currentUser}){
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
         <div style={{color:B.text,fontSize:18,fontWeight:800}}>👥 Usuarios</div>
-        <button style={{...css.btnSm,color:B.accent,borderColor:B.accent+"40"}} onClick={()=>{setForm(F0);setEditId(null);setView("form");}}>+ Nuevo</button>
+        <div style={{display:"flex",gap:8}}>
+          <button style={css.btnSm} onClick={refresh} disabled={refreshing}>{refreshing?"…":"🔄 Actualizar lista"}</button>
+          <button style={{...css.btnSm,color:B.accent,borderColor:B.accent+"40"}} onClick={()=>setView("instrucciones")}>+ Nuevo</button>
+        </div>
       </div>
       {users.map(u=>{
         const activos=[...PERM_CARGA,...PERM_FUNC].filter(p=>u.permisos&&u.permisos[p.k]).length;
@@ -1848,31 +1906,50 @@ function InsumosLimpieza({user}){
   );
 }
 
-/* SESIÓN PERSISTENTE (12 h): evita re-loguear en cada apertura de la PWA.
-   Se guarda solo el id; el usuario se rebusca en la lista actualizada,
-   así los cambios de permisos hechos por el admin se aplican al restaurar. */
+/* SESIÓN (Supabase Auth, con logout forzado a las 12h)
+   La sesión real (token, refresh) la persiste y renueva el propio SDK de
+   supabase-js en su localStorage — no hay que reimplementar eso. Lo único
+   que se guarda acá es el timestamp del login, para el logout forzado a
+   las 12h (pensado para tablet compartida de piso de planta): el SDK por
+   sí solo no tiene ese timeout, así que se chequea a mano al arrancar. */
 const SESSION_HS=12;
-const restoreSession=()=>{
-  const s=LS.get("_session",null);
-  if(!s||!s.id) return null;
-  if(Date.now()-s.ts>SESSION_HS*3600*1000){ LS.del("_session"); return null; }
-  return LS.get("users").find(u=>u.id===s.id)||null;
-};
+const sessionExpired=()=>{ const ts=LS.get("_login_ts",0); return ts && Date.now()-ts>SESSION_HS*3600*1000; };
 
 /* APP */
 function App(){
   const [user,setUser]=useState(null);
   const [screen,setScreen]=useState("home");
-  const [syncing,setSyncing]=useState(SUPA_READY);
+  const [syncing,setSyncing]=useState(!!sb);
   const [syncErr,setSyncErr]=useState(false);
   const [obN,setObN]=useState(0); // registros pendientes de subir (outbox)
 
-  // Al abrir: 1) reintentar lo pendiente de subir, 2) bajar datos frescos, 3) restaurar sesión
+  // Al abrir: 1) ¿hay sesión de Supabase Auth vigente? 2) si venció (12h) o no
+  // hay, mostrar Login directo, SIN tocar la base — recién con sesión válida
+  // se reintenta el outbox, se baja lo nuevo (pullAll) y se arma "user".
+  // (antes pullAll() corría siempre, incluso sin login — con RLS más estricto
+  // eso pisaría la caché local con datos vacíos antes de loguear.)
   useEffect(()=>{
-    if(!SUPA_READY){ setUser(restoreSession()); setSyncing(false); return; }
+    if(!sb){ setSyncing(false); return; } // sin Supabase configurado: no hay forma de autenticar
     let alive=true;
-    obFlush().then(()=>pullAll()).then(ok=>{ if(!alive)return; setSyncErr(!ok); setUser(restoreSession()); setSyncing(false); });
+    (async()=>{
+      if(sessionExpired()){ await sb.auth.signOut(); LS.del("_login_ts"); }
+      const { data:{ session } } = await sb.auth.getSession();
+      if(!alive) return;
+      if(!session){ setSyncing(false); return; }
+      const ok = await obFlush().then(()=>pullAll());
+      if(!alive) return;
+      setSyncErr(!ok);
+      setUser(await loadUserFromAuth(session.user.id));
+      setSyncing(false);
+    })();
     return ()=>{alive=false;};
+  },[]);
+
+  // Reacciona si la sesión se cierra desde otro lado (token inválido, etc.)
+  useEffect(()=>{
+    if(!sb) return;
+    const { data:{ subscription } } = sb.auth.onAuthStateChange(event=>{ if(event==="SIGNED_OUT") setUser(null); });
+    return ()=>subscription.unsubscribe();
   },[]);
 
   // Refresco periódico del contador de pendientes del outbox
@@ -1883,8 +1960,15 @@ function App(){
     return ()=>clearInterval(t);
   },[]);
 
-  const login=u=>{ LS.set("_session",{id:u.id,ts:Date.now()}); setUser(u); };
-  const logout=()=>{ LS.del("_session"); setUser(null); setScreen("home"); };
+  // Login ya validó las credenciales contra Supabase Auth (sb.auth.signInWithPassword)
+  // y trajo el perfil (u); acá falta sincronizar los datos recién ahora que hay sesión.
+  const login=async u=>{
+    LS.set("_login_ts",Date.now());
+    setSyncing(true);
+    const ok=await obFlush().then(()=>pullAll());
+    setSyncErr(!ok); setUser(u); setSyncing(false);
+  };
+  const logout=()=>{ sb&&sb.auth.signOut(); LS.del("_login_ts"); setUser(null); setScreen("home"); };
   const retryOutbox=()=>{ obFlush().then(()=>setObN(obGet().length)); };
 
   if(syncing) return (

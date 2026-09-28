@@ -71,29 +71,41 @@ Se hizo una auditoría completa de código + seguridad. Fixes ya aplicados y en 
 - `consumos.delete` ahora filtra también por `empresa_id` (antes solo por tabla/id destino).
 - `consumos.unidad` se completa desde el ítem origen (antes siempre `null`).
 
-### Pendiente de ejecutar (a mano, ya con el SQL dado)
-- **Cambiar contraseñas por defecto** en Supabase (`admin`, `supervisor`, `operario` — seed hardcodeado `admin/1234` sigue en el fuente como fallback offline hasta que haya auth real):
-```sql
-UPDATE usuarios SET pw = 'NUEVA_CLAVE'
-WHERE usr = 'admin' AND empresa_id = '00000000-0000-0000-0000-0000000000c1';
-```
+### Contraseñas por defecto y auth real (28/09/2026)
+Se resolvió junto con la migración de auth de la §5: las 3 contraseñas por
+defecto (`admin`/`supervisor`/`operario`) se rotan como parte del propio
+`UPDATE` del Bloque 2 de `supabase/migrations/20260928_01_auth_phase_a.sql`
+(la misma contraseña nueva sirve para Supabase Auth y para la columna `pw`,
+que se retiene un tiempo más como red de contención, no se borra todavía).
+El seed hardcodeado `USERS_DEF` en el fuente ya no lleva `pw` — dejó de ser
+un fallback de login (ver §5, ya no está bloqueado).
 
 ---
 
 ## 4. Auditoría de seguridad — resumen
 
-**Veredicto:** hoy la app es segura *por oscuridad* (nadie conoce la URL/clave), no por diseño. **No está lista para venderse profesionalmente sin auth real.**
+**Veredicto (actualizado 28/09/2026, ver §5):** con la Fase A de auth ya
+implementada, el login real y las políticas RLS por `authenticated` +
+`empresa_id` existen — pero **todavía no son lo único que manda**: la
+política vieja `mvp_all` (abierta a `anon`, sin restricción) sigue activa a
+propósito hasta validar el frontend nuevo en cada entorno. Hasta que se
+corra la Fase B (revocar `anon`, borrar `pw`), el veredicto de fondo sigue
+siendo el mismo: **no está lista para venderse profesionalmente.**
 
 | Área | Estado | Detalle |
 |---|---|---|
-| Autenticación | 🔴 Crítico | Login es un filtro client-side en JS. No hay hashing (contraseñas en texto plano), no hay validación de servidor. Cualquiera con la consola del navegador lo saltea. |
-| Autorización | 🔴 Crítico | Permisos se evalúan solo en cliente. La clave anon de Supabase tiene poder total (RLS permisivo + GRANTs amplios). |
+| Autenticación | 🟡 Fase A hecha, falta Fase B | Login real vía Supabase Auth ya implementado (`index.html`). Sigue en 🟡 y no 🟢 porque el `anon` todavía tiene acceso total en paralelo (política vieja `mvp_all` sin revocar) — ver §5. |
+| Autorización | 🟡 Fase A hecha, falta Fase B | RLS por `authenticated`+`empresa_id` ya escrito y aplicado (`current_empresa_id()`/`is_admin()`), con protección específica contra auto-promoción en `usuarios`. Mismo motivo que arriba: no es efectivo del todo hasta revocar `anon`. |
 | Inyección SQL | 🟢 OK | supabase-js usa PostgREST con parámetros tipados, no concatena SQL. |
 | XSS | 🟢 OK | React escapa por defecto, no se usa `dangerouslySetInnerHTML`. PDF escapa `& < >` correctamente. |
-| Secretos expuestos | 🟡 Por diseño, con excepción | La clave anon pública es normal en Supabase. El problema real es que la tabla `usuarios` con `pw` en claro es legible con esa clave — la fuga es la combinación, no la clave en sí. |
+| Secretos expuestos | 🟡 Por diseño, con excepción | La clave anon pública es normal en Supabase. La tabla `usuarios` con `pw` en claro todavía es legible con esa clave hasta la Fase B (borra la columna). |
 | CSV injection | 🟢 Resuelto | Mitigado en la última versión. |
 
-**Lo único que resuelve el punto crítico:** migrar a **Supabase Auth** (login real, hashing bcrypt gestionado, sesiones JWT) + **RLS endurecido** (políticas solo para `authenticated`, revocar todo a `anon`, eliminar columna `pw`).
+**Para que el punto crítico quede resuelto de verdad, falta correr la Fase
+B** (§5): revocar `anon`, borrar la columna `pw`. Fase A por sí sola ya es
+una mejora real (login con contraseña hasheada gestionada por Supabase,
+sesiones JWT, en vez de comparación de texto plano en el cliente) pero
+convive con el acceso viejo hasta confirmar el corte.
 
 **Vectores adicionales identificados** (no cubiertos por checklists genéricos):
 - Autorización entre clientes: hoy `empresa_id` es un filtro de cortesía del cliente JS, no impuesto por la base. Con un segundo cliente comercial, RLS debe imponer `empresa_id = (claim del JWT)`.
@@ -103,23 +115,65 @@ WHERE usr = 'admin' AND empresa_id = '00000000-0000-0000-0000-0000000000c1';
 
 ---
 
-## 5. Auth real — plan (BLOQUEADO, esperando al cliente)
+## 5. Auth real — implementado (Fase A), sin esperar al cliente
 
-**Estado: en espera de decisión de Gustavo (cliente).** No arrancar sin su respuesta.
+**Estado (28/09/2026): Fase A ya implementada en testing y producción, sin
+esperar la decisión de Gustavo.** El cliente todavía no confirmó la compra;
+se decidió avanzar igual para profesionalizar la app en esta ventana, antes
+de que haya más usuarios/datos reales del cliente en juego.
 
-**La decisión pendiente a llevarle** (una sola, dos opciones):
+**Cómo se resolvió la decisión de Opción A/B:** el login sigue pidiendo el
+usuario corto de siempre (`admin`, `mgonzalez`, etc. — no cambió el form).
+Internamente se mapea de forma determinística a
+`${usr}@chefexpres.local` (dominio placeholder, no recibe mails reales —
+los usuarios se crean pre-confirmados desde el Dashboard, sin flujo de
+invitación). Mecánicamente es la Opción B, pero migrar a email real por
+persona más adelante es solo cambiar el `email` de esa cuenta en
+`auth.users` — no toca `usuarios.auth_id` ni ninguna política. Sigue
+vigente el principio: "la arquitectura soporta ambas sin retrabajo".
 
-- **Opción A — Email propio por operario:** cada empleado usa su email real, invitación vía Supabase. Pro: identidad verificable persona a persona, recupero de contraseña autogestionado. Contra: depende de que todos tengan y usen email; alta/baja de personal requiere gestión.
-- **Opción B — Emails genéricos por puesto** (`operario1@...`, `deposito@...`): el login corto actual (`operario`, `admin`) se mapea a un email por detrás, transición invisible para el personal. Pro: cero fricción. Contra: la traza dice "puesto", no "persona".
+**Lo que se hizo (Fase A — aditivo, no rompe nada de lo ya desplegado):**
 
-Recomendación dada al cliente: **B para arrancar**, con A como upgrade posterior si se necesita identidad individual fuerte. La arquitectura soporta ambas sin retrabajo.
+1. `usuarios.auth_id` (ya existía en la tabla, sin usar) ahora vincula cada
+   fila con su `auth.users` correspondiente. Trigger
+   `on_auth_user_created` autoprovisiona la fila de `usuarios` al crear un
+   usuario nuevo desde el Dashboard (con `usr`/`nombre` = local-part del
+   email, permisos en false — el admin completa el resto desde la pantalla
+   Usuarios).
+2. **RLS:** se agregaron políticas nuevas para `authenticated` (funciones
+   helper `current_empresa_id()`/`is_admin()`, con `usuarios` protegida
+   aparte para que un autenticado no-admin no pueda auto-promocionarse) —
+   **conviviendo con la política `mvp_all` vieja, que sigue activa**. No se
+   revocó `anon` todavía: eso es la Fase B, deliberadamente pospuesta hasta
+   confirmar que el frontend nuevo funciona en cada entorno (`CLAUDE.md
+   §10`: testing primero, producción después, no se avanza sin validar).
+3. **App (`index.html`):** `Login` usa `sb.auth.signInWithPassword`; la
+   sesión la maneja supabase-js, con un logout forzado a las 12h
+   reimplementado a mano sobre eso (mismo comportamiento de antes, pensado
+   para tablet compartida de piso de planta). `pullAll()` ya no corre antes
+   de tener sesión (bug que se hubiera vuelto crítico recién al llegar la
+   Fase B — con RLS estricto, una llamada sin sesión pisaba la caché local
+   con datos vacíos en vez de fallar con error).
+4. Todo el detalle técnico (SQL exacto, orden de pasos, qué cambió línea a
+   línea) vive en `supabase/migrations/20260928_01_auth_phase_a.sql` y en
+   el propio diff de `index.html`.
 
-**Plan técnico una vez que el cliente decida (4 pasos):**
+**Pérdidas de funcionalidad aceptadas conscientemente, no bugs:**
+- El admin ya no puede dar de alta un usuario nuevo 100% desde la app — hay
+  un paso previo en el Dashboard de Supabase (ver panel "+ Nuevo" en
+  Usuarios, que ahora muestra instrucciones en vez de un form de alta).
+- El admin ya no puede resetear la contraseña de otro usuario desde la app
+  — se hace desde el Dashboard (Authentication → Users → el usuario).
+- Ya no hay login 100% offline en un dispositivo nuevo sin haber sincronizado
+  nunca (real login siempre requiere contactar a Supabase al menos una vez;
+  la sesión ya iniciada sí sigue funcionando offline).
 
-1. **Supabase Auth con invitación por email** — alta de usuarios desde el dashboard o `inviteUserByEmail`, sin contraseñas en la tabla `usuarios`.
-2. **Migración de la tabla `usuarios`:** conserva `nombre`, `permisos`, `es_admin`; se vincula por `auth_uid` (FK a `auth.users`); se **elimina la columna `pw`**.
-3. **RLS real:** políticas por `authenticated` + `empresa_id`; se revoca todo a `anon`. Aplican los GRANTs explícitos (ver sección 6).
-4. **App:** login pasa a `sb.auth.signInWithPassword`; la sesión la maneja supabase-js (reemplaza la sesión local de 12 h); `pullAll` depende del token.
+**Pendiente — Fase B (deferida, correr por entorno recién cuando el
+frontend nuevo esté validado ahí):** revocar `anon` de las 15 tablas, borrar
+la política `mvp_all`, eliminar la columna `usuarios.pw`, sacar del código
+el fallback viejo. Requiere primero migrar el workflow de keepalive
+(`supabase-keepalive.yml`) a una tabla `_keepalive` dedicada, porque hoy le
+pega a `usuarios` con la key `anon` — eso se rompe en cuanto se revoque.
 
 ---
 
